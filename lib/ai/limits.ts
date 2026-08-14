@@ -26,7 +26,7 @@ export const MIN_INTEGRATED_REVIEW_SESSIONS = 2;
 export const MAX_NEXT_QUESTIONS = 3;
 export const MAX_COMMON_THEMES = 3;
 export const MAX_CROSS_INSIGHTS = 3;
-export const MAX_HYPOTHESES = 3;
+export const MAX_HYPOTHESES = 2;
 export const MAX_OPEN_QUESTIONS = 5;
 
 export const MAX_REVIEW_EVIDENCE_REFS_PER_ITEM = 4;

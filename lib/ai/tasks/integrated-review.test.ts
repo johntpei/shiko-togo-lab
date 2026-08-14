@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   INTEGRATED_REVIEW_MAX_INPUT_CHARS,
   MAX_COMMON_THEMES,
+  MAX_HYPOTHESES,
   MAX_NEXT_QUESTIONS,
 } from "../limits";
 import { INTEGRATED_REVIEW_PROMPT_VERSION } from "../prompts/integrated-review";
@@ -77,6 +78,8 @@ const validOutput = {
     {
       text: "期限を自分で選べると動きやすい可能性がある。",
       rationale: "自由と締切の両方を本人が述べているため。",
+      validationIdea:
+        "締切を自分で置いた週と置かなかった週で、実際に進んだ作業量を比較する。",
       evidenceRefs: ["S01:M001:E01", "S02:M001:E01"],
     },
   ],
@@ -127,7 +130,10 @@ test("Case A: 2 Session 選択なら Review 可能", async () => {
     const result = await runIntegratedReview(twoSessions, "統合レビュー — テスト", {
       generateStructured: async (request) => {
         called = true;
-        assert.equal(request.schemaName, "integrated_review_v2");
+        assert.equal(request.schemaName, "integrated_review_v3");
+        const contextIdx = request.user.indexOf("CURRENT CONTEXT");
+        const sessionIdx = request.user.indexOf("SESSION S01");
+        assert.ok(contextIdx >= 0 && sessionIdx > contextIdx);
         assert.match(request.user, /思考統合研究所/);
         assert.doesNotMatch(request.user, /選んでいないSession/);
         return { parsed: validOutput, model: "returned-model" };
@@ -140,6 +146,10 @@ test("Case A: 2 Session 選択なら Review 可能", async () => {
         assert.equal(
           input.payload.hypotheses[0]?.rationale,
           "自由と締切の両方を本人が述べているため。",
+        );
+        assert.match(
+          input.payload.hypotheses[0]?.validationIdea ?? "",
+          /締切を自分で置いた週/,
         );
         assert.equal(input.sessionIds.includes("s1"), true);
         assert.equal(input.sessionIds.includes("s2"), true);
@@ -289,7 +299,7 @@ test("Case J: hypotheses が空でも保存できる", async () => {
   });
 });
 
-test("v2: commonThemes は最大3件", async () => {
+test("v3: commonThemes は最大3件", async () => {
   await withReviewEnv(async () => {
     const result = await runIntegratedReview(twoSessions, "統合レビュー — テスト", {
       generateStructured: async () => ({
@@ -311,7 +321,58 @@ test("v2: commonThemes は最大3件", async () => {
   });
 });
 
-test("v2: hypothesis に rationale が無いと保存しない", async () => {
+test("v3: hypotheses は最大2件", async () => {
+  await withReviewEnv(async () => {
+    const result = await runIntegratedReview(twoSessions, "統合レビュー — テスト", {
+      generateStructured: async () => ({
+        parsed: {
+          ...validOutput,
+          hypotheses: [1, 2, 3].map((n) => ({
+            text: `仮説${n}`,
+            rationale: "根拠があるため。",
+            validationIdea: `比較${n}で確認する。`,
+            evidenceRefs: ["S01:M001:E01", "S02:M001:E01"],
+          })),
+        },
+        model: "test-model",
+      }),
+      save: (input) => {
+        assert.equal(input.payload.hypotheses.length, MAX_HYPOTHESES);
+        return { id: "review-1" };
+      },
+    });
+    assert.equal(result.ok, true);
+  });
+});
+
+test("Case F: hypothesis に validationIdea が無いと保存しない", async () => {
+  await withReviewEnv(async () => {
+    let saved = false;
+    const result = await runIntegratedReview(twoSessions, "統合レビュー — テスト", {
+      generateStructured: async () => ({
+        parsed: {
+          ...validOutput,
+          hypotheses: [
+            {
+              text: "検証方法のない仮説",
+              rationale: "根拠があるように見えるため。",
+              evidenceRefs: ["S01:M001:E01", "S02:M001:E01"],
+            },
+          ],
+        },
+        model: "test-model",
+      }),
+      save: () => {
+        saved = true;
+        return { id: "review-1" };
+      },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(saved, false);
+  });
+});
+
+test("v3: hypothesis に rationale が無いと保存しない", async () => {
   await withReviewEnv(async () => {
     let saved = false;
     const result = await runIntegratedReview(twoSessions, "統合レビュー — テスト", {

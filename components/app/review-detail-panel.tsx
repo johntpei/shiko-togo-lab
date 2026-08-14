@@ -58,6 +58,16 @@ function ItemBlock({
           <p className="mt-1 text-sm leading-7 text-muted">{item.rationale}</p>
         </>
       ) : null}
+      {item.validationIdea ? (
+        <>
+          <p className="mt-2 text-[11px] font-bold text-muted">
+            どう確かめるか
+          </p>
+          <p className="mt-1 text-sm leading-7 text-muted">
+            {item.validationIdea}
+          </p>
+        </>
+      ) : null}
       {caption ? (
         <p className="mt-1 text-[11px] font-bold text-muted">{caption}</p>
       ) : null}

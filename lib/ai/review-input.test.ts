@@ -115,3 +115,12 @@ test("Current Context は新しいSessionと現在名称を明示する", () => 
   assert.match(note, /S02/);
   assert.match(note, /新しいSessionを古いSessionより優先/);
 });
+
+test("Case B: 古い名称は Session 入力から削除せず歴史として残る", () => {
+  const input = buildIntegratedReviewInput([
+    source("s1", "思考補完計画｜統合研究所", "2026-07-18", [userA]),
+    source("s2", "思考統合研究所", "2026-08-02", [userC]),
+  ]);
+  assert.match(input.labeledTranscript, /思考補完計画｜統合研究所/);
+  assert.doesNotMatch(input.labeledTranscript, /CURRENT CONTEXT/);
+});

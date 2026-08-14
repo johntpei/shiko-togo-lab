@@ -16,18 +16,17 @@ import {
 import {
   INTEGRATED_REVIEW_PROMPT_VERSION,
   INTEGRATED_REVIEW_SYSTEM_PROMPT,
-  buildIntegratedReviewUserPromptV2,
+  buildIntegratedReviewUserPromptV3,
 } from "../prompts/integrated-review";
 import type { AiProvider } from "../provider";
 import { getAiProvider } from "../provider";
 import {
   buildIntegratedReviewInput,
-  buildReviewCurrentContextNote,
   type ReviewSessionSource,
 } from "../review-input";
 import {
   defaultReviewSettings,
-  integratedReviewV2OutputSchema,
+  integratedReviewV3OutputSchema,
   type StoredReviewEvidence,
   type StoredReviewItem,
   type StoredReviewPayload,
@@ -85,7 +84,7 @@ function storeItem(
   text: string,
   evidence: ValidatedEvidence[],
   semantic: { valid: boolean; reason: string | null },
-  extra?: { rationale?: string },
+  extra?: { rationale?: string; validationIdea?: string },
 ): StoredReviewItem {
   return {
     text,
@@ -93,6 +92,7 @@ function storeItem(
     semanticValid: semantic.valid,
     invalidReason: semantic.reason as StoredReviewItem["invalidReason"],
     rationale: extra?.rationale,
+    validationIdea: extra?.validationIdea,
   };
 }
 
@@ -147,12 +147,9 @@ export async function runIntegratedReview(
     const generated = await deps.generateStructured({
       model: config.model,
       system: INTEGRATED_REVIEW_SYSTEM_PROMPT,
-      user: buildIntegratedReviewUserPromptV2(
-        input.labeledTranscript,
-        buildReviewCurrentContextNote(input.sessions),
-      ),
-      schema: integratedReviewV2OutputSchema,
-      schemaName: "integrated_review_v2",
+      user: buildIntegratedReviewUserPromptV3(input.labeledTranscript),
+      schema: integratedReviewV3OutputSchema,
+      schemaName: "integrated_review_v3",
       timeoutMs: INTEGRATED_REVIEW_TIMEOUT_MS,
     });
     parsedUnknown = generated.parsed;
@@ -171,7 +168,7 @@ export async function runIntegratedReview(
     };
   }
 
-  const parsed = integratedReviewV2OutputSchema.safeParse(parsedUnknown);
+  const parsed = integratedReviewV3OutputSchema.safeParse(parsedUnknown);
   if (!parsed.success) {
     return {
       ok: false,
@@ -250,7 +247,7 @@ export async function runIntegratedReview(
       item.text,
       evidence,
       validateHypothesisSupport(evidence, input.unitsByRef),
-      { rationale: item.rationale },
+      { rationale: item.rationale, validationIdea: item.validationIdea },
     );
   });
 

@@ -59,3 +59,43 @@ export function textsAreNearDuplicates(left: string, right: string) {
   }
   return a.includes(b) || b.includes(a);
 }
+
+const EXAGGERATION_TERMS = [
+  "劇的",
+  "決定的",
+  "飛躍的",
+  "革新的",
+  "大幅",
+  "圧倒的",
+];
+
+const UNVERIFIABLE_PHRASES = [
+  "劇的に改善する",
+  "次のレベルへ進める",
+  "決定的な洞察",
+  "大きな価値を生む",
+  "効果が非常に高い",
+  "成功につながる可能性が高い",
+];
+
+export function hasUnsupportedExaggeration(text: string) {
+  return EXAGGERATION_TERMS.some((term) => text.includes(term));
+}
+
+export function isUnverifiableHypothesis(text: string) {
+  return UNVERIFIABLE_PHRASES.some((phrase) => text.includes(phrase));
+}
+
+export function isVagueValidationIdea(text: string) {
+  const compact = text.replaceAll(/\s/g, "");
+  if (!compact) {
+    return true;
+  }
+  if (compact === "今後確認する" || compact === "今後確認する。") {
+    return true;
+  }
+  if (compact === "使ってみる" || compact === "使ってみる。") {
+    return true;
+  }
+  return false;
+}

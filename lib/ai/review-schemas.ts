@@ -34,6 +34,13 @@ export const reviewHypothesisItemSchema = z.object({
   evidenceRefs: z.array(z.string()),
 });
 
+export const reviewHypothesisV3ItemSchema = z.object({
+  text: z.string(),
+  rationale: z.string(),
+  validationIdea: z.string(),
+  evidenceRefs: z.array(z.string()),
+});
+
 export const integratedReviewOutputSchema = z.object({
   summary: z.string(),
   commonThemes: z.array(reviewItemSchema),
@@ -64,6 +71,21 @@ export type IntegratedReviewV2Output = z.infer<
   typeof integratedReviewV2OutputSchema
 >;
 
+export const integratedReviewV3OutputSchema = z.object({
+  summary: z.string(),
+  commonThemes: z.array(reviewItemSchema),
+  shifts: z.array(reviewShiftItemSchema),
+  tensions: z.array(reviewItemSchema),
+  crossInsights: z.array(reviewItemSchema),
+  hypotheses: z.array(reviewHypothesisV3ItemSchema),
+  openQuestions: z.array(reviewItemSchema),
+  nextQuestions: z.array(reviewItemSchema),
+});
+
+export type IntegratedReviewV3Output = z.infer<
+  typeof integratedReviewV3OutputSchema
+>;
+
 export const storedReviewEvidenceSchema = z.object({
   messageRef: z.string(),
   quote: z.string(),
@@ -82,6 +104,7 @@ const storedReviewItemBase = {
   semanticValid: z.boolean().optional(),
   invalidReason: z.enum(REVIEW_SEMANTIC_FAILURE_REASONS).nullable().optional(),
   rationale: z.string().optional(),
+  validationIdea: z.string().optional(),
 };
 
 export const storedReviewItemSchema = z.object(storedReviewItemBase);

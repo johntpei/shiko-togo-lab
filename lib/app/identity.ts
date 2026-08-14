@@ -1,1 +1,3 @@
-export const APP_NAME = "思考統合研究所";
+import { currentProjectContext } from "./current-context";
+
+export const APP_NAME = currentProjectContext.projectName;
