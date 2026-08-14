@@ -130,11 +130,12 @@ test("Case A: 2 Session 選択なら Review 可能", async () => {
     const result = await runIntegratedReview(twoSessions, "統合レビュー — テスト", {
       generateStructured: async (request) => {
         called = true;
-        assert.equal(request.schemaName, "integrated_review_v3");
+        assert.equal(request.schemaName, "integrated_review_v4");
         const contextIdx = request.user.indexOf("CURRENT CONTEXT");
         const sessionIdx = request.user.indexOf("SESSION S01");
         assert.ok(contextIdx >= 0 && sessionIdx > contextIdx);
         assert.match(request.user, /思考統合研究所/);
+        assert.match(request.user, /Core Purpose:/);
         assert.doesNotMatch(request.user, /選んでいないSession/);
         return { parsed: validOutput, model: "returned-model" };
       },
@@ -151,6 +152,10 @@ test("Case A: 2 Session 選択なら Review 可能", async () => {
           input.payload.hypotheses[0]?.validationIdea ?? "",
           /締切を自分で置いた週/,
         );
+        assert.equal(input.payload.crossInsights[0]?.supportType, "cross_session_interpretation");
+        assert.equal(input.payload.hypotheses[0]?.supportType, "hypothesis");
+        assert.equal(input.payload.shifts[0]?.supportType, "direct");
+        assert.equal(input.payload.shifts[0]?.guardType, "hard");
         assert.equal(input.sessionIds.includes("s1"), true);
         assert.equal(input.sessionIds.includes("s2"), true);
         return { id: "review-1" };
@@ -395,5 +400,96 @@ test("v3: hypothesis に rationale が無いと保存しない", async () => {
     });
     assert.equal(result.ok, false);
     assert.equal(saved, false);
+  });
+});
+
+test("Case C: 顧客獲得への飛躍 Cross Insight は Hard Guard で除外", async () => {
+  await withReviewEnv(async () => {
+    const result = await runIntegratedReview(twoSessions, "統合レビュー — テスト", {
+      generateStructured: async () => ({
+        parsed: {
+          ...validOutput,
+          crossInsights: [
+            {
+              text: "このサービスは顧客獲得増加につながる。",
+              evidenceRefs: ["S01:M001:E01", "S02:M001:E01"],
+            },
+          ],
+        },
+        model: "test-model",
+      }),
+      save: (input) => {
+        assert.equal(input.payload.crossInsights[0]?.semanticValid, false);
+        assert.equal(input.payload.crossInsights[0]?.invalidReason, "domain_leap");
+        assert.equal(input.payload.crossInsights[0]?.guardType, "hard");
+        return { id: "review-1" };
+      },
+    });
+    assert.equal(result.ok, true);
+  });
+});
+
+test("Case J: Cross Insight と Common Theme が実質同じなら重複除外", async () => {
+  await withReviewEnv(async () => {
+    const result = await runIntegratedReview(twoSessions, "統合レビュー — テスト", {
+      generateStructured: async () => ({
+        parsed: {
+          ...validOutput,
+          commonThemes: [
+            {
+              text: "人間側の運用設計が繰り返し重要視されている。",
+              evidenceRefs: ["S01:M001:E01", "S02:M001:E01"],
+            },
+          ],
+          crossInsights: [
+            {
+              text: "人間側の運用設計が繰り返し重要視されている。",
+              evidenceRefs: ["S01:M001:E01", "S02:M001:E01"],
+            },
+          ],
+        },
+        model: "test-model",
+      }),
+      save: (input) => {
+        assert.equal(input.payload.commonThemes[0]?.semanticValid, true);
+        assert.equal(input.payload.crossInsights[0]?.semanticValid, false);
+        assert.equal(
+          input.payload.crossInsights[0]?.invalidReason,
+          "duplicate_interpretation",
+        );
+        return { id: "review-1" };
+      },
+    });
+    assert.equal(result.ok, true);
+  });
+});
+
+test("Case G / H: 弱い Next Question は除外し、境界の問いは残す", async () => {
+  await withReviewEnv(async () => {
+    const result = await runIntegratedReview(twoSessions, "統合レビュー — テスト", {
+      generateStructured: async () => ({
+        parsed: {
+          ...validOutput,
+          nextQuestions: [
+            { text: "次のステップは何か？", evidenceRefs: [] },
+            {
+              text: "自動化と本人判断の境界をどこに置くべきか？",
+              evidenceRefs: [],
+            },
+          ],
+        },
+        model: "test-model",
+      }),
+      save: (input) => {
+        assert.equal(input.payload.nextQuestions[0]?.semanticValid, false);
+        assert.equal(
+          input.payload.nextQuestions[0]?.invalidReason,
+          "weak_next_question",
+        );
+        assert.equal(input.payload.nextQuestions[1]?.semanticValid, true);
+        return { id: "review-1" };
+      },
+    });
+    assert.equal(result.ok, true);
   });
 });

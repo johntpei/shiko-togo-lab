@@ -37,6 +37,7 @@ export function claimLeapsToUnmentionedDomain(
   const leapTerms = [
     "リピートユーザー",
     "ユーザー獲得",
+    "顧客獲得",
     "再利用率",
     "SaaS成長",
     "顧客維持",
@@ -98,4 +99,12 @@ export function isVagueValidationIdea(text: string) {
     return true;
   }
   return false;
+}
+
+export function isPsychologicalOverclaim(text: string) {
+  return (
+    /恐れている/.test(text) ||
+    /強く望んでいる/.test(text) ||
+    /不安を感じ/.test(text)
+  );
 }

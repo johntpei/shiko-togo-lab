@@ -16,7 +16,7 @@ import {
 import {
   INTEGRATED_REVIEW_PROMPT_VERSION,
   INTEGRATED_REVIEW_SYSTEM_PROMPT,
-  buildIntegratedReviewUserPromptV3,
+  buildIntegratedReviewUserPromptV4,
 } from "../prompts/integrated-review";
 import type { AiProvider } from "../provider";
 import { getAiProvider } from "../provider";
@@ -26,16 +26,20 @@ import {
 } from "../review-input";
 import {
   defaultReviewSettings,
-  integratedReviewV3OutputSchema,
+  integratedReviewV4OutputSchema,
   type StoredReviewEvidence,
   type StoredReviewItem,
   type StoredReviewPayload,
   type StoredReviewShiftItem,
+  type ReviewSupportType,
 } from "../review-schemas";
+import { textsAreNearDuplicates } from "../review-quality";
 import {
+  computeReviewGuardStats,
   validateCommonThemeSupport,
   validateCrossInsightSupport,
   validateHypothesisSupport,
+  validateNextQuestionSupport,
   validateOptionalEvidence,
   validateShiftSupport,
   validateTensionSupport,
@@ -83,14 +87,24 @@ function toStoredEvidence(evidence: ValidatedEvidence): StoredReviewEvidence {
 function storeItem(
   text: string,
   evidence: ValidatedEvidence[],
-  semantic: { valid: boolean; reason: string | null },
-  extra?: { rationale?: string; validationIdea?: string },
+  semantic: {
+    valid: boolean;
+    reason: string | null;
+    guardType: StoredReviewItem["guardType"];
+  },
+  extra?: {
+    rationale?: string;
+    validationIdea?: string;
+    supportType?: ReviewSupportType;
+  },
 ): StoredReviewItem {
   return {
     text,
     evidence: evidence.map(toStoredEvidence),
     semanticValid: semantic.valid,
     invalidReason: semantic.reason as StoredReviewItem["invalidReason"],
+    guardType: semantic.guardType,
+    supportType: extra?.supportType,
     rationale: extra?.rationale,
     validationIdea: extra?.validationIdea,
   };
@@ -147,9 +161,9 @@ export async function runIntegratedReview(
     const generated = await deps.generateStructured({
       model: config.model,
       system: INTEGRATED_REVIEW_SYSTEM_PROMPT,
-      user: buildIntegratedReviewUserPromptV3(input.labeledTranscript),
-      schema: integratedReviewV3OutputSchema,
-      schemaName: "integrated_review_v3",
+      user: buildIntegratedReviewUserPromptV4(input.labeledTranscript),
+      schema: integratedReviewV4OutputSchema,
+      schemaName: "integrated_review_v4",
       timeoutMs: INTEGRATED_REVIEW_TIMEOUT_MS,
     });
     parsedUnknown = generated.parsed;
@@ -168,7 +182,7 @@ export async function runIntegratedReview(
     };
   }
 
-  const parsed = integratedReviewV3OutputSchema.safeParse(parsedUnknown);
+  const parsed = integratedReviewV4OutputSchema.safeParse(parsedUnknown);
   if (!parsed.success) {
     return {
       ok: false,
@@ -192,7 +206,8 @@ export async function runIntegratedReview(
     return storeItem(
       item.text,
       evidence,
-      validateCommonThemeSupport(evidence, input.unitsByRef),
+      validateCommonThemeSupport(evidence, input.unitsByRef, item.text),
+      { supportType: "cross_session_interpretation" },
     );
   });
 
@@ -216,6 +231,8 @@ export async function runIntegratedReview(
       evidence: evidence.map(toStoredEvidence),
       semanticValid: semantic.valid,
       invalidReason: semantic.reason,
+      guardType: semantic.guardType,
+      supportType: "direct",
     };
   });
 
@@ -224,18 +241,36 @@ export async function runIntegratedReview(
     return storeItem(
       item.text,
       evidence,
-      validateTensionSupport(evidence, input.unitsByRef),
+      validateTensionSupport(evidence, input.unitsByRef, item.text),
+      { supportType: "cross_session_interpretation" },
     );
-  });
+    });
 
   const crossInsights = parsed.data.crossInsights
     .slice(0, MAX_CROSS_INSIGHTS)
     .map((item) => {
     const evidence = resolve(item.evidenceRefs);
+    const semantic = validateCrossInsightSupport(
+      evidence,
+      input.unitsByRef,
+      item.text,
+    );
+    const duplicate = commonThemes.some(
+      (theme) =>
+        theme.semanticValid !== false &&
+        textsAreNearDuplicates(theme.text, item.text),
+    );
     return storeItem(
       item.text,
       evidence,
-      validateCrossInsightSupport(evidence, input.unitsByRef),
+      duplicate
+        ? {
+            valid: false,
+            reason: "duplicate_interpretation",
+            guardType: "interpretation",
+          }
+        : semantic,
+      { supportType: "cross_session_interpretation" },
     );
   });
 
@@ -246,8 +281,12 @@ export async function runIntegratedReview(
     return storeItem(
       item.text,
       evidence,
-      validateHypothesisSupport(evidence, input.unitsByRef),
-      { rationale: item.rationale, validationIdea: item.validationIdea },
+      validateHypothesisSupport(evidence, input.unitsByRef, item.text),
+      {
+        rationale: item.rationale,
+        validationIdea: item.validationIdea,
+        supportType: "hypothesis",
+      },
     );
   });
 
@@ -255,14 +294,20 @@ export async function runIntegratedReview(
     .slice(0, MAX_OPEN_QUESTIONS)
     .map((item) => {
     const evidence = resolve(item.evidenceRefs);
-    return storeItem(item.text, evidence, validateOptionalEvidence(evidence));
+    return storeItem(item.text, evidence, validateOptionalEvidence(evidence), {
+      supportType: "direct",
+    });
   });
 
   const nextQuestions = parsed.data.nextQuestions
     .slice(0, MAX_NEXT_QUESTIONS)
     .map((item) => {
       const evidence = resolve(item.evidenceRefs);
-      return storeItem(item.text, evidence, validateOptionalEvidence(evidence));
+      return storeItem(
+        item.text,
+        evidence,
+        validateNextQuestionSupport(item.text, evidence),
+      );
     });
 
   const allItems = [
@@ -280,6 +325,7 @@ export async function runIntegratedReview(
       if (item.semanticValid === false) {
         console.info("integrated-review semantic_support_failed", {
           reason: item.invalidReason,
+          guardType: item.guardType,
         });
       }
     }
@@ -298,6 +344,7 @@ export async function runIntegratedReview(
     metrics: {
       ...computeEvidenceStats(allItems),
       ...computeSemanticStats(allItems),
+      ...computeReviewGuardStats(allItems),
       sessionCount: input.analyzableSessionCount,
     },
   };

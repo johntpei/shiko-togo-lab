@@ -22,6 +22,13 @@ test("Case A: Evidenceにないリピートユーザー概念への飛躍を検�
   );
   assert.equal(
     claimLeapsToUnmentionedDomain(
+      "このサービスは顧客獲得増加につながる。",
+      evidence,
+    ),
+    true,
+  );
+  assert.equal(
+    claimLeapsToUnmentionedDomain(
       "保存より再利用がボトルネックである可能性がある。",
       evidence,
     ),

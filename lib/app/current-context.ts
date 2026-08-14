@@ -4,6 +4,7 @@
  */
 export type CurrentProjectContext = {
   projectName: string;
+  corePurpose: string;
   currentGoal?: string;
   currentMvpScope?: string;
   adoptedDecisions?: readonly string[];
@@ -11,8 +12,12 @@ export type CurrentProjectContext = {
   currentTools?: readonly string[];
 };
 
+export const CORE_PURPOSE =
+  "AIとの対話から得た知見を取りこぼさず、複数の対話をつなぎ、次のAI対話へ再利用できるようにする。";
+
 export const currentProjectContext: CurrentProjectContext = {
   projectName: "思考統合研究所",
+  corePurpose: CORE_PURPOSE,
 };
 
 function optionalLines(label: string, value: string | undefined) {
@@ -46,11 +51,14 @@ export function formatCurrentContextBlock(
     "Canonical:",
     "true",
     "",
+    "Core Purpose:",
+    context.corePurpose,
+    "",
     "Instruction:",
     "This is the current canonical project name.",
     "Historical project names appearing in Sessions are historical context only.",
     "Do not use them as the current project name unless a newer explicit user decision changes this context.",
-    "Current Context is not Evidence. Do not cite it as EvidenceRef or invent a Shift from it alone.",
+    "Current Context and Core Purpose are not Evidence. Do not cite them as EvidenceRef or invent a Shift or Cross Insight from them alone.",
     "Priority: Current Context > newer explicit USER Decision > older USER Decision > Assistant suggestion.",
     "Assistant suggestions alone must not change Current State.",
     ...optionalLines("Current Goal", context.currentGoal),

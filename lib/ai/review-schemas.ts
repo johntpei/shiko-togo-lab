@@ -10,10 +10,28 @@ export const REVIEW_SEMANTIC_FAILURE_REASONS = [
   "invalid_evidence_ref",
   "evidence_role_mismatch",
   "unsupported_cross_session_claim",
+  "domain_leap",
+  "unrelated_interpretation",
+  "generic_interpretation",
+  "unsupported_exaggeration",
+  "weak_next_question",
+  "duplicate_interpretation",
 ] as const;
 
 export type ReviewSemanticFailureReason =
   (typeof REVIEW_SEMANTIC_FAILURE_REASONS)[number];
+
+export const REVIEW_SUPPORT_TYPES = [
+  "direct",
+  "cross_session_interpretation",
+  "hypothesis",
+] as const;
+
+export type ReviewSupportType = (typeof REVIEW_SUPPORT_TYPES)[number];
+
+export const REVIEW_GUARD_TYPES = ["hard", "interpretation"] as const;
+
+export type ReviewGuardType = (typeof REVIEW_GUARD_TYPES)[number];
 
 const reviewItemSchema = z.object({
   text: z.string(),
@@ -86,6 +104,10 @@ export type IntegratedReviewV3Output = z.infer<
   typeof integratedReviewV3OutputSchema
 >;
 
+export const integratedReviewV4OutputSchema = integratedReviewV3OutputSchema;
+
+export type IntegratedReviewV4Output = IntegratedReviewV3Output;
+
 export const storedReviewEvidenceSchema = z.object({
   messageRef: z.string(),
   quote: z.string(),
@@ -105,6 +127,8 @@ const storedReviewItemBase = {
   invalidReason: z.enum(REVIEW_SEMANTIC_FAILURE_REASONS).nullable().optional(),
   rationale: z.string().optional(),
   validationIdea: z.string().optional(),
+  supportType: z.enum(REVIEW_SUPPORT_TYPES).optional(),
+  guardType: z.enum(REVIEW_GUARD_TYPES).optional(),
 };
 
 export const storedReviewItemSchema = z.object(storedReviewItemBase);
@@ -140,6 +164,14 @@ export const storedReviewPayloadSchema = z.object({
       semanticItemCount: z.number().optional(),
       semanticValidCount: z.number().optional(),
       semanticValidationRate: z.number().optional(),
+      hardItemCount: z.number().optional(),
+      hardValidCount: z.number().optional(),
+      hardValidationRate: z.number().optional(),
+      hardExcludedCount: z.number().optional(),
+      interpretationItemCount: z.number().optional(),
+      interpretationValidCount: z.number().optional(),
+      interpretationValidationRate: z.number().optional(),
+      interpretationExcludedCount: z.number().optional(),
       sessionCount: z.number().optional(),
     })
     .optional(),
