@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { EVIDENCE_FAILURE_REASONS } from "./evidence";
+import { EVIDENCE_ROLES } from "./evidence-units";
 import { ANALYZE_SESSION_MAX_INPUT_CHARS } from "./limits";
 
 export const ANALYSIS_KINDS = [
@@ -12,6 +13,24 @@ export const ANALYSIS_KINDS = [
 ] as const;
 
 export type AnalysisKind = (typeof ANALYSIS_KINDS)[number];
+
+export const ANALYSIS_SUBJECTS = [
+  "user",
+  "conversation",
+  "external",
+  "interpretation",
+] as const;
+
+export type AnalysisSubject = (typeof ANALYSIS_SUBJECTS)[number];
+
+export const SEMANTIC_FAILURE_REASONS = [
+  "missing_user_evidence",
+  "invalid_evidence_ref",
+  "evidence_role_mismatch",
+  "unsupported_subject_kind",
+] as const;
+
+export type SemanticFailureReason = (typeof SEMANTIC_FAILURE_REASONS)[number];
 
 export const analysisEvidenceSchema = z.object({
   messageRef: z.string(),
@@ -46,12 +65,29 @@ export type SessionAnalysisV3Output = z.infer<
   typeof sessionAnalysisV3OutputSchema
 >;
 
+export const sessionAnalysisV4ItemSchema = z.object({
+  kind: z.enum(ANALYSIS_KINDS),
+  subject: z.enum(ANALYSIS_SUBJECTS),
+  text: z.string(),
+  evidenceRefs: z.array(z.string()),
+});
+
+export const sessionAnalysisV4OutputSchema = z.object({
+  summary: z.string(),
+  items: z.array(sessionAnalysisV4ItemSchema),
+});
+
+export type SessionAnalysisV4Output = z.infer<
+  typeof sessionAnalysisV4OutputSchema
+>;
+
 export const storedEvidenceSchema = z.object({
   messageRef: z.string(),
   quote: z.string(),
   validated: z.boolean(),
   messageId: z.string().nullable(),
   reason: z.enum(EVIDENCE_FAILURE_REASONS).nullable().optional(),
+  role: z.enum(EVIDENCE_ROLES).nullable().optional(),
 });
 
 export const storedAnalysisItemSchema = z.object({
@@ -59,6 +95,9 @@ export const storedAnalysisItemSchema = z.object({
   text: z.string(),
   evidence: z.array(storedEvidenceSchema),
   unsupportedClaim: z.boolean().optional(),
+  subject: z.enum(ANALYSIS_SUBJECTS).optional(),
+  semanticValid: z.boolean().optional(),
+  invalidReason: z.enum(SEMANTIC_FAILURE_REASONS).nullable().optional(),
 });
 
 export const storedAnalysisPayloadSchema = z.object({
@@ -74,6 +113,9 @@ export const storedAnalysisPayloadSchema = z.object({
       evidenceCount: z.number(),
       validatedCount: z.number(),
       validationRate: z.number(),
+      semanticItemCount: z.number().optional(),
+      semanticValidCount: z.number().optional(),
+      semanticValidationRate: z.number().optional(),
     })
     .optional(),
 });

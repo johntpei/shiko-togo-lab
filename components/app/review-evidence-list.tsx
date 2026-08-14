@@ -1,14 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import type { StoredAnalysisPayload } from "@/lib/ai/schemas";
+import { EvidenceLink } from "@/components/app/evidence-link";
 import {
   EVIDENCE_FAILURE_LABELS,
   type EvidenceFailureReason,
 } from "@/lib/ai/evidence";
-import { EvidenceLink } from "@/components/app/evidence-link";
-
-type StoredEvidence = StoredAnalysisPayload["items"][number]["evidence"][number];
+import type { StoredReviewEvidence } from "@/lib/ai/review-schemas";
+import { formatOccurredAt } from "@/lib/sessions/labels";
 
 function failureLabel(reason: string | null | undefined) {
   if (!reason || !(reason in EVIDENCE_FAILURE_LABELS)) {
@@ -17,13 +16,21 @@ function failureLabel(reason: string | null | undefined) {
   return EVIDENCE_FAILURE_LABELS[reason as EvidenceFailureReason];
 }
 
-export function EvidenceList({
-  sessionId,
+function roleLabel(role: StoredReviewEvidence["role"]) {
+  if (role === "user") {
+    return "本人の発言";
+  }
+  if (role === "assistant") {
+    return "AIの発言";
+  }
+  return "発言";
+}
+
+export function ReviewEvidenceList({
   evidence,
   showFailureReasons = false,
 }: {
-  sessionId: string;
-  evidence: StoredEvidence[];
+  evidence: StoredReviewEvidence[];
   showFailureReasons?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -48,12 +55,18 @@ export function EvidenceList({
               key={`${item.messageRef}-${index}`}
               className="rounded-xl border border-line bg-canvas px-3 py-2"
             >
-              <p className="text-[11px] font-bold text-muted">
-                {item.role === "user"
-                  ? "本人の発言"
-                  : item.role === "assistant"
-                    ? "AIの発言"
-                    : `Evidence ${index + 1}`}
+              {item.sessionTitle ? (
+                <p className="text-[11px] font-bold text-ink">
+                  {item.sessionTitle}
+                  {item.occurredAt ? (
+                    <span className="ml-2 font-normal text-muted">
+                      {formatOccurredAt(item.occurredAt)}
+                    </span>
+                  ) : null}
+                </p>
+              ) : null}
+              <p className="mt-0.5 text-[11px] font-bold text-muted">
+                {roleLabel(item.role)}
               </p>
               {item.validated && item.quote ? (
                 <p className="mt-1 text-sm leading-6 text-ink">
@@ -72,10 +85,10 @@ export function EvidenceList({
                   ) : null}
                 </p>
               )}
-              {item.validated && item.messageId ? (
+              {item.validated && item.messageId && item.sessionId ? (
                 <div className="mt-2">
                   <EvidenceLink
-                    sessionId={sessionId}
+                    sessionId={item.sessionId}
                     messageId={item.messageId}
                     label="元発言を見る"
                   />

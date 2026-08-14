@@ -1,3 +1,5 @@
+import type { EvidenceRole } from "./evidence-units";
+
 export type RawEvidence = {
   messageRef: string;
   quote: string;
@@ -17,6 +19,10 @@ export type ValidatedEvidence = RawEvidence & {
   messageId: string | null;
   validated: boolean;
   reason: EvidenceFailureReason | null;
+  role?: EvidenceRole | null;
+  sessionId?: string | null;
+  sessionTitle?: string | null;
+  occurredAt?: string | null;
 };
 
 const KINDS_REQUIRING_EVIDENCE = new Set(["fact", "decision", "action"]);

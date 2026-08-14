@@ -149,4 +149,5 @@ export type SessionRecord = typeof sessions.$inferSelect;
 export type MessageRecord = typeof messages.$inferSelect;
 export type SourceConversationRecord = typeof sourceConversations.$inferSelect;
 export type SessionAnalysisRecord = typeof sessionAnalyses.$inferSelect;
+export type ReviewRecord = typeof reviews.$inferSelect;
 export type EvidenceRecord = typeof evidences.$inferSelect;

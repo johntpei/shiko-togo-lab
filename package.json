@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test lib/ingest/parse-transcript.test.ts lib/import/chatgpt/chatgpt-export.test.ts lib/ai/evidence.test.ts lib/ai/evidence-units.test.ts lib/ai/evidence-refs.test.ts lib/ai/session-input.test.ts lib/ai/tasks/analyze-session.test.ts lib/ai/prompts/analyze-session.test.ts lib/ai/config.test.ts",
+    "test": "tsx --test lib/ingest/parse-transcript.test.ts lib/import/chatgpt/chatgpt-export.test.ts lib/sessions/labels.test.ts lib/reviews/session-picker.test.ts lib/ai/evidence.test.ts lib/ai/evidence-units.test.ts lib/ai/evidence-refs.test.ts lib/ai/semantic-support.test.ts lib/ai/session-input.test.ts lib/ai/review-input.test.ts lib/ai/review-semantic.test.ts lib/ai/review-quality.test.ts lib/ai/tasks/analyze-session.test.ts lib/ai/tasks/integrated-review.test.ts lib/ai/prompts/analyze-session.test.ts lib/ai/prompts/integrated-review.test.ts lib/ai/config.test.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"

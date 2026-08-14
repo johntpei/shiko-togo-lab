@@ -2,6 +2,7 @@ import type { MessageRecord } from "@/lib/db/schema";
 import {
   splitMessageIntoEvidenceUnits,
   toEvidenceRef,
+  toEvidenceRole,
   toMessageRef,
   type EvidenceUnit,
 } from "./evidence-units";
@@ -53,7 +54,7 @@ export function buildAnalyzeInput(messages: AnalyzeMessage[]): AnalyzeInput {
     const ref = toMessageRef(index);
     refToMessageId.set(ref, message.id);
     contentByMessageId.set(message.id, message.content);
-    const role = message.role.toUpperCase();
+    const role = toEvidenceRole(message.role).toUpperCase();
     const attachmentNote = hasAttachments(message.attachmentsJson)
       ? "\n（添付ファイルあり）"
       : "";
@@ -84,7 +85,9 @@ export function buildEvidenceAnalyzeInput(
     const messageRef = toMessageRef(messageIndex);
     contentByMessageId.set(message.id, message.content);
     const slices = splitMessageIntoEvidenceUnits(message.content);
-    blocks.push(`[${message.role.toUpperCase()} MESSAGE ${messageRef}]`);
+    const role = toEvidenceRole(message.role);
+    const roleLabel = role.toUpperCase();
+    blocks.push(`[${roleLabel} MESSAGE ${messageRef}]`);
 
     for (const [unitIndex, slice] of slices.entries()) {
       const localRef = toEvidenceRef({ messageIndex, unitIndex });
@@ -94,12 +97,12 @@ export function buildEvidenceAnalyzeInput(
         ref,
         messageRef,
         messageId: message.id,
-        role: message.role,
+        role,
       };
       units.push(unit);
       unitsByRef.set(localRef, unit);
       unitsByRef.set(ref, unit);
-      blocks.push(`[${localRef}]\n${slice.text}`);
+      blocks.push(`[${localRef}][${roleLabel}]\n${slice.text}`);
     }
 
     if (hasAttachments(message.attachmentsJson)) {

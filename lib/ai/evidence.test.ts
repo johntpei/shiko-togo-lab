@@ -39,6 +39,42 @@ test("v1 形式の payload も読める", () => {
   assert.equal(parsed?.metrics, undefined);
 });
 
+test("v3 形式の payload も subject / semanticValid なしで読める", () => {
+  const parsed = parseStoredAnalysisPayload(
+    JSON.stringify({
+      summary: "v3分析",
+      items: [
+        {
+          kind: "decision",
+          text: "この設計を支持した",
+          evidence: [
+            {
+              messageRef: "M001:E01",
+              quote: "この設計を支持します",
+              validated: true,
+              messageId: "msg-1",
+            },
+          ],
+          unsupportedClaim: false,
+        },
+      ],
+      settings: {
+        provider: "openai",
+        store: false,
+        maxInputChars: 40000,
+      },
+      metrics: {
+        evidenceCount: 1,
+        validatedCount: 1,
+        validationRate: 1,
+      },
+    }),
+  );
+  assert.ok(parsed);
+  assert.equal(parsed?.items[0]?.subject, undefined);
+  assert.equal(parsed?.items[0]?.semanticValid, undefined);
+});
+
 
 const messageId = "msg-user-1";
 const content = "来週から週3回歩くことにします。";

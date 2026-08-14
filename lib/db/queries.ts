@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, lte } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import type { SessionSource } from "@/lib/sessions/constants";
 import {
   assertMessageAnchors,
@@ -7,12 +7,16 @@ import {
 } from "@/lib/ingest/parse-transcript";
 import { getDb } from "./client";
 import type { StoredAnalysisPayload } from "@/lib/ai/schemas";
+import type { StoredReviewPayload } from "@/lib/ai/review-schemas";
 import {
   evidences,
   messages,
+  reviewSessions,
+  reviews,
   sessionAnalyses,
   sessions,
   type MessageRecord,
+  type ReviewRecord,
   type SessionAnalysisRecord,
   type SessionRecord,
 } from "./schema";
@@ -205,4 +209,169 @@ export function insertSessionAnalysis(input: {
   });
 
   return record;
+}
+
+export type SessionReviewCandidate = SessionRecord & {
+  messageCount: number;
+  charCount: number;
+  analyzable: boolean;
+};
+
+export function listSessionReviewCandidates(): SessionReviewCandidate[] {
+  const allSessions = listSessions();
+  const stats = getDb()
+    .select({
+      sessionId: messages.sessionId,
+      messageCount: count(),
+      charCount: sql<number>`coalesce(sum(length(${messages.content})), 0)`,
+    })
+    .from(messages)
+    .where(inArray(messages.role, ["user", "assistant"]))
+    .groupBy(messages.sessionId)
+    .all();
+  const statsById = new Map(
+    stats.map((row) => [
+      row.sessionId,
+      {
+        messageCount: Number(row.messageCount),
+        charCount: Number(row.charCount),
+      },
+    ]),
+  );
+
+  return allSessions.map((session) => {
+    const row = statsById.get(session.id);
+    const messageCount = row?.messageCount ?? 0;
+    const charCount = row?.charCount ?? 0;
+    return {
+      ...session,
+      messageCount,
+      charCount,
+      analyzable: messageCount > 0,
+    };
+  });
+}
+
+export function listSessionsByIds(ids: string[]) {
+  if (ids.length === 0) {
+    return [];
+  }
+  const unique = [...new Set(ids)];
+  const rows = getDb()
+    .select()
+    .from(sessions)
+    .where(inArray(sessions.id, unique))
+    .all();
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  return unique.flatMap((id) => {
+    const row = byId.get(id);
+    return row ? [row] : [];
+  });
+}
+
+export function insertReview(input: {
+  title: string;
+  model: string;
+  promptVersion: string;
+  payload: StoredReviewPayload;
+  sessionIds: string[];
+  evidences: Array<{
+    sessionId: string;
+    messageId: string;
+    quote: string;
+    validated: boolean;
+  }>;
+}): ReviewRecord {
+  const now = new Date().toISOString();
+  const record: ReviewRecord = {
+    id: crypto.randomUUID(),
+    title: input.title,
+    model: input.model,
+    promptVersion: input.promptVersion,
+    payload: JSON.stringify(input.payload),
+    createdAt: now,
+  };
+
+  getDb().transaction((tx) => {
+    tx.insert(reviews).values(record).run();
+    if (input.sessionIds.length > 0) {
+      tx.insert(reviewSessions)
+        .values(
+          input.sessionIds.map((sessionId) => ({
+            reviewId: record.id,
+            sessionId,
+          })),
+        )
+        .run();
+    }
+    if (input.evidences.length > 0) {
+      tx.insert(evidences)
+        .values(
+          input.evidences.map((evidence) => ({
+            id: crypto.randomUUID(),
+            reviewId: record.id,
+            sessionAnalysisId: null,
+            sessionId: evidence.sessionId,
+            messageId: evidence.messageId,
+            quote: evidence.quote,
+            validated: evidence.validated,
+            createdAt: now,
+          })),
+        )
+        .run();
+    }
+  });
+
+  return record;
+}
+
+export function listReviews() {
+  return getDb()
+    .select()
+    .from(reviews)
+    .orderBy(desc(reviews.createdAt))
+    .all();
+}
+
+export type ReviewListItem = ReviewRecord & {
+  sessionCount: number;
+};
+
+export function listReviewsWithSessionCount(): ReviewListItem[] {
+  const all = listReviews();
+  const counts = getDb()
+    .select({
+      reviewId: reviewSessions.reviewId,
+      sessionCount: count(),
+    })
+    .from(reviewSessions)
+    .groupBy(reviewSessions.reviewId)
+    .all();
+  const countById = new Map(
+    counts.map((row) => [row.reviewId, Number(row.sessionCount)]),
+  );
+  return all.map((review) => ({
+    ...review,
+    sessionCount: countById.get(review.id) ?? 0,
+  }));
+}
+
+export function getReviewById(id: string) {
+  return getDb().select().from(reviews).where(eq(reviews.id, id)).get() ?? null;
+}
+
+export function listSessionsByReviewId(reviewId: string) {
+  return getDb()
+    .select({ session: sessions })
+    .from(reviewSessions)
+    .innerJoin(sessions, eq(sessions.id, reviewSessions.sessionId))
+    .where(eq(reviewSessions.reviewId, reviewId))
+    .orderBy(asc(sessions.occurredAt), asc(sessions.createdAt))
+    .all()
+    .map((row) => row.session);
+}
+
+export function countReviews() {
+  const row = getDb().select({ value: count() }).from(reviews).get();
+  return row?.value ?? 0;
 }

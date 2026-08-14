@@ -15,7 +15,7 @@ function message(
 
 const sampleMessages = [
   message("msg-1", "user", "来週から週3回歩くことにします。"),
-  message("msg-2", "assistant", "記録用の表を作りましょうか。"),
+  message("msg-2", "assistant", "記録用の表を作りましょうか。続けると定着しやすいです。"),
 ];
 
 const validOutput = {
@@ -23,6 +23,7 @@ const validOutput = {
   items: [
     {
       kind: "decision" as const,
+      subject: "user" as const,
       text: "週3回歩くことを決めた。",
       evidenceRefs: ["M001:E01"],
     },
@@ -85,31 +86,39 @@ test("Case A: APIキーなしでは分析せず保存しない", async () => {
   }
 });
 
-test("v3: EvidenceRef から原文 quote をサーバーが確定する", async () => {
+test("v4: EvidenceRef から原文 quote をサーバーが確定する", async () => {
   await withAnalyzeEnv(async () => {
     let systemPrompt = "";
+    let schemaName = "";
     const result = await runAnalyzeSession("session-1", sampleMessages, {
       generateStructured: async (request) => {
         systemPrompt = request.system;
+        schemaName = request.schemaName;
         return { parsed: validOutput, model: "returned-model" };
       },
       save: (input) => {
-        const evidence = input.payload.items[0]?.evidence[0];
-        assert.equal(input.promptVersion, "analyze-session-v3");
+        const item = input.payload.items[0];
+        const evidence = item?.evidence[0];
+        assert.equal(input.promptVersion, "analyze-session-v4");
+        assert.equal(item?.subject, "user");
+        assert.equal(item?.semanticValid, true);
         assert.equal(evidence?.validated, true);
         assert.equal(evidence?.quote, "来週から週3回歩くことにします。");
         assert.equal(evidence?.messageId, "msg-1");
+        assert.equal(evidence?.role, "user");
         assert.equal(input.payload.metrics?.validationRate, 1);
+        assert.equal(input.payload.metrics?.semanticValidationRate, 1);
         return { id: "analysis-1" };
       },
     });
     assert.equal(result.ok, true);
-    assert.match(systemPrompt, /Evidence本文を生成しない/);
-    assert.equal(ANALYZE_SESSION_PROMPT_VERSION, "analyze-session-v3");
+    assert.equal(schemaName, "session_analysis_v4");
+    assert.match(systemPrompt, /USER Evidence が無ければ Decision を絶対に生成しない/);
+    assert.equal(ANALYZE_SESSION_PROMPT_VERSION, "analyze-session-v4");
   });
 });
 
-test("v3: 存在しない EvidenceRef は validated = false", async () => {
+test("v4: 存在しない EvidenceRef は Evidence / Semantic ともに成立しない", async () => {
   await withAnalyzeEnv(async () => {
     const result = await runAnalyzeSession("session-1", sampleMessages, {
       generateStructured: async () => ({
@@ -118,6 +127,7 @@ test("v3: 存在しない EvidenceRef は validated = false", async () => {
           items: [
             {
               kind: "fact",
+              subject: "conversation",
               text: "不明な参照",
               evidenceRefs: ["M999:E01"],
             },
@@ -126,11 +136,13 @@ test("v3: 存在しない EvidenceRef は validated = false", async () => {
         model: "test-model",
       }),
       save: (input) => {
-        const evidence = input.payload.items[0]?.evidence[0];
+        const item = input.payload.items[0];
+        const evidence = item?.evidence[0];
         assert.equal(evidence?.validated, false);
         assert.equal(evidence?.reason, "invalid_evidence_ref");
-        assert.equal(evidence?.messageId, null);
-        assert.equal(input.payload.items[0]?.unsupportedClaim, true);
+        assert.equal(item?.semanticValid, false);
+        assert.equal(item?.invalidReason, "invalid_evidence_ref");
+        assert.equal(item?.kind, "fact");
         return { id: "analysis-1" };
       },
     });
@@ -138,7 +150,7 @@ test("v3: 存在しない EvidenceRef は validated = false", async () => {
   });
 });
 
-test("v3: Assistant 提案だけの Decision は unsupported", async () => {
+test("v4: Assistant 提案だけの Decision は semantic invalid のまま保存し kind を変えない", async () => {
   await withAnalyzeEnv(async () => {
     const result = await runAnalyzeSession("session-1", sampleMessages, {
       generateStructured: async () => ({
@@ -147,6 +159,7 @@ test("v3: Assistant 提案だけの Decision は unsupported", async () => {
           items: [
             {
               kind: "decision",
+              subject: "user",
               text: "表を作ることにした",
               evidenceRefs: ["M002:E01"],
             },
@@ -155,8 +168,12 @@ test("v3: Assistant 提案だけの Decision は unsupported", async () => {
         model: "test-model",
       }),
       save: (input) => {
-        assert.equal(input.payload.items[0]?.evidence[0]?.validated, true);
-        assert.equal(input.payload.items[0]?.unsupportedClaim, true);
+        const item = input.payload.items[0];
+        assert.equal(item?.kind, "decision");
+        assert.equal(item?.evidence[0]?.validated, true);
+        assert.equal(item?.semanticValid, false);
+        assert.equal(item?.invalidReason, "evidence_role_mismatch");
+        assert.equal(input.payload.metrics?.semanticValidCount, 0);
         return { id: "analysis-1" };
       },
     });
@@ -170,6 +187,36 @@ test("Case F: schema 不一致は DB へ保存しない", async () => {
     const result = await runAnalyzeSession("session-1", sampleMessages, {
       generateStructured: async () => ({
         parsed: { nope: true },
+        model: "test-model",
+      }),
+      save: () => {
+        saved = true;
+        return { id: "analysis-1" };
+      },
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "schema");
+    }
+    assert.equal(saved, false);
+  });
+});
+
+test("v4: subject が無い出力は schema 不一致として保存しない", async () => {
+  await withAnalyzeEnv(async () => {
+    let saved = false;
+    const result = await runAnalyzeSession("session-1", sampleMessages, {
+      generateStructured: async () => ({
+        parsed: {
+          summary: "subjectなし",
+          items: [
+            {
+              kind: "decision",
+              text: "週3回歩く",
+              evidenceRefs: ["M001:E01"],
+            },
+          ],
+        },
         model: "test-model",
       }),
       save: () => {

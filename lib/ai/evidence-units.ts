@@ -2,6 +2,10 @@ export const EVIDENCE_UNIT_MIN_CHARS = 20;
 export const EVIDENCE_UNIT_MAX_CHARS = 250;
 export const MAX_EVIDENCE_REFS_PER_ITEM = 3;
 
+export const EVIDENCE_ROLES = ["user", "assistant", "unknown"] as const;
+
+export type EvidenceRole = (typeof EVIDENCE_ROLES)[number];
+
 export type EvidenceUnitSlice = {
   text: string;
   charStartInMessage: number;
@@ -12,8 +16,19 @@ export type EvidenceUnit = EvidenceUnitSlice & {
   ref: string;
   messageRef: string;
   messageId: string;
-  role: string;
+  role: EvidenceRole;
+  sessionId?: string;
+  sessionTitle?: string;
+  sessionOccurredAt?: string;
 };
+
+export function toEvidenceRole(role: string): EvidenceRole {
+  const normalized = role.trim().toLowerCase();
+  if (normalized === "user" || normalized === "assistant") {
+    return normalized;
+  }
+  return "unknown";
+}
 
 export function toMessageRef(index: number) {
   return `M${String(index + 1).padStart(3, "0")}`;

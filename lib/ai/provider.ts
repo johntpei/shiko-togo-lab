@@ -9,6 +9,7 @@ export type StructuredGenerateRequest = {
   user: string;
   schema: z.ZodType;
   schemaName: string;
+  timeoutMs?: number;
 };
 
 export type StructuredGenerateResult = {

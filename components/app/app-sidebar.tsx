@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { APP_NAME } from "@/lib/app/identity";
 
 const nav = [
   { href: "/", label: "ホーム", icon: House },
@@ -35,7 +36,7 @@ export function AppSidebar() {
           <span className="flex size-9 items-center justify-center rounded-xl bg-blue-600 text-white shadow-lg shadow-blue-600/20">
             <BrainCircuit className="size-5" aria-hidden="true" />
           </span>
-          <span className="text-sm tracking-wide">思考統合研究所</span>
+          <span className="text-sm tracking-wide">{APP_NAME}</span>
         </Link>
       </div>
 

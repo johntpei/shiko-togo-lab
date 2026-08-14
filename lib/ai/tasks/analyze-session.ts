@@ -1,9 +1,6 @@
 import { getAiConfig } from "../config";
 import { AnalyzeSessionError, userMessageForAnalyzeError } from "../errors";
-import {
-  isV3UnsupportedClaim,
-  resolveEvidenceRefs,
-} from "../evidence-refs";
+import { isV3UnsupportedClaim, resolveEvidenceRefs } from "../evidence-refs";
 import { computeEvidenceStats } from "../evidence";
 import { isAnalyzeInputTooLong } from "../limits";
 import {
@@ -15,9 +12,13 @@ import type { AiProvider } from "../provider";
 import { getAiProvider } from "../provider";
 import {
   defaultAnalysisSettings,
-  sessionAnalysisV3OutputSchema,
+  sessionAnalysisV4OutputSchema,
   type StoredAnalysisPayload,
 } from "../schemas";
+import {
+  computeSemanticStats,
+  validateSemanticSupport,
+} from "../semantic-support";
 import {
   buildEvidenceAnalyzeInput,
   type AnalyzeMessage,
@@ -95,8 +96,8 @@ export async function runAnalyzeSession(
       model: config.model,
       system: ANALYZE_SESSION_SYSTEM_PROMPT,
       user: buildAnalyzeSessionUserPrompt(input.labeledTranscript),
-      schema: sessionAnalysisV3OutputSchema,
-      schemaName: "session_analysis_v3",
+      schema: sessionAnalysisV4OutputSchema,
+      schemaName: "session_analysis_v4",
     });
     parsedUnknown = generated.parsed;
     usedModel = generated.model || config.model;
@@ -105,7 +106,7 @@ export async function runAnalyzeSession(
     return { ok: false, ...mapped };
   }
 
-  const parsed = sessionAnalysisV3OutputSchema.safeParse(parsedUnknown);
+  const parsed = sessionAnalysisV4OutputSchema.safeParse(parsedUnknown);
   if (!parsed.success) {
     return {
       ok: false,
@@ -120,10 +121,22 @@ export async function runAnalyzeSession(
       input.unitsByRef,
       input.contentByMessageId,
     );
+    const semantic = validateSemanticSupport(
+      {
+        kind: item.kind,
+        subject: item.subject,
+        evidenceRefs: item.evidenceRefs,
+      },
+      input.unitsByRef,
+      evidence,
+    );
     return {
       kind: item.kind,
+      subject: item.subject,
       text: item.text,
       evidence,
+      semanticValid: semantic.valid,
+      invalidReason: semantic.reason,
       unsupportedClaim: isV3UnsupportedClaim(
         item.kind,
         evidence,
@@ -144,10 +157,11 @@ export async function runAnalyzeSession(
           reason: evidence.reason,
         });
       }
-      if (item.unsupportedClaim) {
-        console.info("analyze-session unsupported claim", {
+      if (item.semanticValid === false) {
+        console.info("analyze-session semantic_support_failed", {
           kind: item.kind,
-          reason: "unsupported_claim",
+          subject: item.subject,
+          reason: item.invalidReason,
         });
       }
     }
@@ -157,7 +171,10 @@ export async function runAnalyzeSession(
     summary: parsed.data.summary,
     items,
     settings: defaultAnalysisSettings(config.provider),
-    metrics: computeEvidenceStats(items),
+    metrics: {
+      ...computeEvidenceStats(items),
+      ...computeSemanticStats(items),
+    },
   };
 
   const evidences = items.flatMap((item) =>

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { resolveEvidenceRef, isV3UnsupportedClaim } from "./evidence-refs";
-import { splitMessageIntoEvidenceUnits, toEvidenceRef } from "./evidence-units";
+import {
+  splitMessageIntoEvidenceUnits,
+  toEvidenceRef,
+  toEvidenceRole,
+} from "./evidence-units";
 import type { EvidenceUnit } from "./evidence-units";
 
 function unitFor(
@@ -20,7 +24,7 @@ function unitFor(
       ref,
       messageRef: `M${String(messageIndex + 1).padStart(3, "0")}`,
       messageId,
-      role,
+      role: toEvidenceRole(role),
     });
   });
   return { unitsByRef, contentByMessageId };

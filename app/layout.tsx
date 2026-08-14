@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Noto_Sans_JP } from "next/font/google";
+import { APP_NAME } from "@/lib/app/identity";
 import "./globals.css";
 
 const notoSansJp = Noto_Sans_JP({
@@ -10,8 +11,8 @@ const notoSansJp = Noto_Sans_JP({
 
 export const metadata: Metadata = {
   title: {
-    default: "思考統合研究所",
-    template: "%s | 思考統合研究所",
+    default: APP_NAME,
+    template: `%s | ${APP_NAME}`,
   },
   description:
     "ChatGPTとの対話を取りこぼさず、振り返りと次の対話へ再利用できる思考資産へ変える個人ツールです。",

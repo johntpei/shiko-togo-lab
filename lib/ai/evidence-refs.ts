@@ -4,8 +4,23 @@ import {
   type EvidenceUnit,
 } from "./evidence-units";
 
-export function limitEvidenceRefs(refs: string[]) {
-  return refs.slice(0, MAX_EVIDENCE_REFS_PER_ITEM);
+export function limitEvidenceRefs(
+  refs: string[],
+  max = MAX_EVIDENCE_REFS_PER_ITEM,
+) {
+  return refs.slice(0, max);
+}
+
+function withSessionMeta(
+  evidence: ValidatedEvidence,
+  unit?: EvidenceUnit,
+): ValidatedEvidence {
+  return {
+    ...evidence,
+    sessionId: unit?.sessionId ?? evidence.sessionId ?? null,
+    sessionTitle: unit?.sessionTitle ?? evidence.sessionTitle ?? null,
+    occurredAt: unit?.sessionOccurredAt ?? evidence.occurredAt ?? null,
+  };
 }
 
 export function resolveEvidenceRef(
@@ -15,52 +30,66 @@ export function resolveEvidenceRef(
 ): ValidatedEvidence {
   const unit = unitsByRef.get(ref.trim());
   if (!unit) {
-    return {
+    return withSessionMeta({
       messageRef: ref,
       quote: "",
       messageId: null,
       validated: false,
       reason: "invalid_evidence_ref",
-    };
+      role: null,
+    });
   }
 
   const content = contentByMessageId.get(unit.messageId);
   if (content == null) {
-    return {
-      messageRef: unit.ref,
-      quote: unit.text,
-      messageId: null,
-      validated: false,
-      reason: "invalid_message_ref",
-    };
+    return withSessionMeta(
+      {
+        messageRef: unit.ref,
+        quote: unit.text,
+        messageId: null,
+        validated: false,
+        reason: "invalid_message_ref",
+        role: unit.role,
+      },
+      unit,
+    );
   }
 
   const slice = content.slice(unit.charStartInMessage, unit.charEndInMessage);
   if (slice !== unit.text) {
-    return {
+    return withSessionMeta(
+      {
+        messageRef: unit.ref,
+        quote: unit.text,
+        messageId: unit.messageId,
+        validated: false,
+        reason: "quote_not_found",
+        role: unit.role,
+      },
+      unit,
+    );
+  }
+
+  return withSessionMeta(
+    {
       messageRef: unit.ref,
       quote: unit.text,
       messageId: unit.messageId,
-      validated: false,
-      reason: "quote_not_found",
-    };
-  }
-
-  return {
-    messageRef: unit.ref,
-    quote: unit.text,
-    messageId: unit.messageId,
-    validated: true,
-    reason: null,
-  };
+      validated: true,
+      reason: null,
+      role: unit.role,
+    },
+    unit,
+  );
 }
 
 export function resolveEvidenceRefs(
   refs: string[],
   unitsByRef: Map<string, EvidenceUnit>,
   contentByMessageId: Map<string, string>,
+  max?: number,
 ) {
-  return limitEvidenceRefs(refs).map((ref) =>
+  return limitEvidenceRefs(refs, max).map((ref) =>
     resolveEvidenceRef(ref, unitsByRef, contentByMessageId),
   );
 }

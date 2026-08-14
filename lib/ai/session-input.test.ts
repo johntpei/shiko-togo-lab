@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ANALYZE_SESSION_MAX_INPUT_CHARS } from "./limits";
-import { buildAnalyzeInput } from "./session-input";
+import { buildAnalyzeInput, buildEvidenceAnalyzeInput } from "./session-input";
 import type { AnalyzeMessage } from "./session-input";
 
 function message(
@@ -52,4 +52,18 @@ test("Case H: 上限定数は1か所で、長大入力を判定できる", () =>
   const oversized = "あ".repeat(ANALYZE_SESSION_MAX_INPUT_CHARS + 1);
   const input = buildAnalyzeInput([message("u1", "user", oversized)]);
   assert.ok(input.labeledTranscript.length > ANALYZE_SESSION_MAX_INPUT_CHARS);
+});
+
+test("Evidence Unit 入力は ref ごとに role を明示する", () => {
+  const input = buildEvidenceAnalyzeInput([
+    message("u1", "user", "この設計を支持します。この方針で進めます。"),
+    message("a1", "assistant", "Knowledge機能はMVPから外すのがおすすめです。"),
+  ]);
+
+  assert.match(input.labeledTranscript, /\[USER MESSAGE M001\]/);
+  assert.match(input.labeledTranscript, /\[M001:E01\]\[USER\]/);
+  assert.match(input.labeledTranscript, /\[ASSISTANT MESSAGE M002\]/);
+  assert.match(input.labeledTranscript, /\[M002:E01\]\[ASSISTANT\]/);
+  assert.equal(input.unitsByRef.get("M001:E01")?.role, "user");
+  assert.equal(input.unitsByRef.get("M002:E01")?.role, "assistant");
 });

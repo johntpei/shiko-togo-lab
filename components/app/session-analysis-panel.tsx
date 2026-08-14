@@ -16,8 +16,15 @@ const KIND_LABELS: Record<AnalysisKind, string> = {
   insight: "気づき",
   hypothesis: "仮説",
   decision: "決定",
-  open_question: "未解決の問い",
   action: "次の行動",
+  open_question: "未解決の問い",
+};
+
+const SEMANTIC_FAILURE_LABELS: Record<string, string> = {
+  missing_user_evidence: "本人の発言根拠がありません",
+  invalid_evidence_ref: "根拠参照が無効です",
+  evidence_role_mismatch: "根拠の発言者（本人/AI）が分類に合いません",
+  unsupported_subject_kind: "subject と kind の組み合わせが不正です",
 };
 
 function formatAnalyzedAt(iso: string) {
@@ -31,13 +38,50 @@ function formatAnalyzedAt(iso: string) {
   }).format(date);
 }
 
-function formatValidationRate(payload: StoredAnalysisPayload) {
+function formatPercent(rate: number) {
+  return `${Math.round(rate * 100)}%`;
+}
+
+function formatQuality(payload: StoredAnalysisPayload) {
   const metrics = payload.metrics;
-  if (!metrics || metrics.evidenceCount === 0) {
-    return null;
+  if (!metrics) {
+    return [];
   }
-  const percent = Math.round(metrics.validationRate * 100);
-  return `根拠一致 ${metrics.validatedCount}/${metrics.evidenceCount}（${percent}%）`;
+  const lines: string[] = [];
+  if (metrics.evidenceCount > 0) {
+    lines.push(
+      `根拠 ${metrics.validatedCount}/${metrics.evidenceCount}（${formatPercent(metrics.validationRate)}）`,
+    );
+  }
+  if (
+    metrics.semanticItemCount != null &&
+    metrics.semanticValidCount != null &&
+    metrics.semanticValidationRate != null &&
+    metrics.semanticItemCount > 0
+  ) {
+    lines.push(
+      `意味的根拠 ${metrics.semanticValidCount}/${metrics.semanticItemCount}（${formatPercent(metrics.semanticValidationRate)}）`,
+    );
+  }
+  return lines;
+}
+
+function isDisplayedItem(
+  item: StoredAnalysisPayload["items"][number],
+) {
+  return item.semanticValid !== false;
+}
+
+function isInterpretiveInsight(
+  item: StoredAnalysisPayload["items"][number],
+) {
+  if (item.kind !== "insight") {
+    return false;
+  }
+  if (item.subject === "interpretation") {
+    return true;
+  }
+  return item.subject == null && item.evidence.length >= 2;
 }
 
 export function SessionAnalysisPanel({
@@ -55,7 +99,9 @@ export function SessionAnalysisPanel({
   payload: StoredAnalysisPayload;
   showFailureReasons?: boolean;
 }) {
-  const rateLabel = formatValidationRate(payload);
+  const qualityLabels = formatQuality(payload);
+  const visibleItems = payload.items.filter(isDisplayedItem);
+  const hiddenItems = payload.items.filter((item) => !isDisplayedItem(item));
 
   return (
     <div className="rounded-2xl border border-line bg-white p-5 shadow-[0_12px_40px_-30px_rgba(15,23,42,0.45)] sm:p-6">
@@ -69,19 +115,19 @@ export function SessionAnalysisPanel({
             {promptVersion}
           </>
         ) : null}
-        {rateLabel ? (
-          <>
+        {qualityLabels.map((label) => (
+          <span key={label}>
             <span className="mx-2 text-line">/</span>
-            {rateLabel}
-          </>
-        ) : null}
+            {label}
+          </span>
+        ))}
       </p>
 
       <h3 className="mt-4 text-sm font-bold text-ink">概要</h3>
       <p className="mt-2 text-sm leading-7 text-ink">{payload.summary}</p>
 
       {KIND_ORDER.map((kind) => {
-        const items = payload.items.filter((item) => item.kind === kind);
+        const items = visibleItems.filter((item) => item.kind === kind);
         if (items.length === 0) {
           return null;
         }
@@ -94,14 +140,14 @@ export function SessionAnalysisPanel({
               {items.map((item, index) => (
                 <li key={`${kind}-${index}`}>
                   <p className="text-sm leading-7 text-ink">{item.text}</p>
-                  {kind === "insight" && item.evidence.length >= 2 ? (
+                  {isInterpretiveInsight(item) ? (
                     <p className="mt-1 text-[11px] font-bold text-muted">
                       AIによる統合的な解釈
                     </p>
                   ) : null}
                   {kind === "hypothesis" ? (
                     <p className="mt-1 text-[11px] font-bold text-muted">
-                      Evidenceから導いた仮説（原文にそのまま書いてある事実ではありません）
+                      仮説（原文にそのまま書いてある事実ではありません）
                     </p>
                   ) : null}
                   {item.evidence.length > 0 ? (
@@ -131,6 +177,37 @@ export function SessionAnalysisPanel({
           </section>
         );
       })}
+
+      {showFailureReasons && hiddenItems.length > 0 ? (
+        <details className="mt-6 rounded-xl border border-line bg-canvas px-3 py-2">
+          <summary className="cursor-pointer text-[11px] font-bold text-muted">
+            Semantic Guardで除外した項目 {hiddenItems.length}件
+          </summary>
+          <ul className="mt-2 grid gap-2">
+            {hiddenItems.map((item, index) => (
+              <li
+                key={`hidden-${item.kind}-${index}`}
+                className="text-[11px] leading-5 text-muted"
+              >
+                <span className="font-bold">
+                  {KIND_LABELS[item.kind]}
+                  {item.subject ? ` / ${item.subject}` : ""}
+                </span>
+                {item.invalidReason ? (
+                  <span className="ml-1">
+                    ({item.invalidReason}
+                    {SEMANTIC_FAILURE_LABELS[item.invalidReason]
+                      ? ` / ${SEMANTIC_FAILURE_LABELS[item.invalidReason]}`
+                      : ""}
+                    )
+                  </span>
+                ) : null}
+                <span className="mt-0.5 block">{item.text}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
     </div>
   );
 }

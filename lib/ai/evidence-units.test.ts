@@ -4,6 +4,7 @@ import {
   assertUnitAnchors,
   splitMessageIntoEvidenceUnits,
   toEvidenceRef,
+  toEvidenceRole,
   parseEvidenceRef,
 } from "./evidence-units";
 
@@ -72,6 +73,13 @@ test("Case F: text === content.slice(start, end)", () => {
       unit.text,
     );
   }
+});
+
+test("toEvidenceRole は Message.role から決定論的に決める", () => {
+  assert.equal(toEvidenceRole("user"), "user");
+  assert.equal(toEvidenceRole("assistant"), "assistant");
+  assert.equal(toEvidenceRole("unknown"), "unknown");
+  assert.equal(toEvidenceRole("system"), "unknown");
 });
 
 test("EvidenceRef は S01:M003:E02 へ拡張できる", () => {

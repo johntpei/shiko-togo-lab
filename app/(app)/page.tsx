@@ -6,11 +6,15 @@ import {
   Upload,
 } from "lucide-react";
 import Link from "next/link";
+import { ReviewCard } from "@/components/app/review-card";
 import { SessionCard } from "@/components/app/session-card";
 import {
+  countReviews,
   countSessionsInDateRange,
   listRecentSessions,
+  listReviewsWithSessionCount,
 } from "@/lib/db/queries";
+import { APP_NAME } from "@/lib/app/identity";
 import { currentWeekRange } from "@/lib/sessions/labels";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +23,8 @@ export default function DashboardPage() {
   const week = currentWeekRange();
   const weekCount = countSessionsInDateRange(week.start, week.end);
   const recentSessions = listRecentSessions(5);
+  const reviewCount = countReviews();
+  const recentReviews = listReviewsWithSessionCount().slice(0, 3);
 
   return (
     <div className="mx-auto max-w-6xl px-5 py-10 sm:px-8 sm:py-14">
@@ -26,7 +32,7 @@ export default function DashboardPage() {
         DASHBOARD
       </p>
       <h1 className="mt-2 text-3xl font-black tracking-tight text-ink sm:text-4xl">
-        思考統合研究所
+        {APP_NAME}
       </h1>
       <p className="mt-3 max-w-2xl text-sm leading-7 text-muted sm:text-base">
         ChatGPTとの対話を登録し、まとめて振り返り、次の対話へ持ち帰れるようにします。
@@ -66,7 +72,7 @@ export default function DashboardPage() {
           </Link>
         </div>
         <Link
-          href="/reviews/new"
+          href="/reviews/new?preset=this-week"
           className="flex items-start gap-4 rounded-2xl border border-line bg-white p-5 shadow-[0_12px_40px_-30px_rgba(15,23,42,0.45)] hover:border-blue-200 hover:bg-brand-soft"
         >
           <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 ring-1 ring-emerald-100">
@@ -98,12 +104,33 @@ export default function DashboardPage() {
             <ScanSearch className="size-4" aria-hidden="true" />
             最近の Review
           </div>
-          <p className="mt-3 text-2xl font-black text-ink">まだありません</p>
+          <p className="mt-3 text-2xl font-black text-ink">{reviewCount}</p>
           <p className="mt-1 text-xs text-muted">
-            統合レビューすると履歴が出ます
+            {reviewCount === 0
+              ? "統合レビューすると履歴が出ます"
+              : "保存された統合レビューの件数"}
           </p>
         </article>
       </div>
+
+      {recentReviews.length > 0 ? (
+        <section className="mt-10">
+          <div className="mb-4 flex items-end justify-between gap-3">
+            <h2 className="text-lg font-black text-ink">最近の Review</h2>
+            <Link
+              href="/reviews"
+              className="text-sm font-bold text-blue-600 hover:underline"
+            >
+              すべて見る
+            </Link>
+          </div>
+          <div className="grid gap-3">
+            {recentReviews.map((review) => (
+              <ReviewCard key={review.id} review={review} />
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {recentSessions.length > 0 ? (
         <section className="mt-10">

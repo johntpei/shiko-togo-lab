@@ -1,0 +1,366 @@
+import { getAiConfig } from "../config";
+import { AnalyzeSessionError, userMessageForAnalyzeError } from "../errors";
+import { computeEvidenceStats } from "../evidence";
+import { resolveEvidenceRefs } from "../evidence-refs";
+import {
+  INTEGRATED_REVIEW_TIMEOUT_MS,
+  MAX_COMMON_THEMES,
+  MAX_CROSS_INSIGHTS,
+  MAX_HYPOTHESES,
+  MAX_NEXT_QUESTIONS,
+  MAX_OPEN_QUESTIONS,
+  MAX_REVIEW_EVIDENCE_REFS_PER_ITEM,
+  MIN_INTEGRATED_REVIEW_SESSIONS,
+  isIntegratedReviewInputTooLong,
+} from "../limits";
+import {
+  INTEGRATED_REVIEW_PROMPT_VERSION,
+  INTEGRATED_REVIEW_SYSTEM_PROMPT,
+  buildIntegratedReviewUserPromptV2,
+} from "../prompts/integrated-review";
+import type { AiProvider } from "../provider";
+import { getAiProvider } from "../provider";
+import {
+  buildIntegratedReviewInput,
+  buildReviewCurrentContextNote,
+  type ReviewSessionSource,
+} from "../review-input";
+import {
+  defaultReviewSettings,
+  integratedReviewV2OutputSchema,
+  type StoredReviewEvidence,
+  type StoredReviewItem,
+  type StoredReviewPayload,
+  type StoredReviewShiftItem,
+} from "../review-schemas";
+import {
+  validateCommonThemeSupport,
+  validateCrossInsightSupport,
+  validateHypothesisSupport,
+  validateOptionalEvidence,
+  validateShiftSupport,
+  validateTensionSupport,
+} from "../review-semantic";
+import { computeSemanticStats } from "../semantic-support";
+import type { ValidatedEvidence } from "../evidence";
+
+export type IntegratedReviewResult =
+  | { ok: true; reviewId: string }
+  | { ok: false; error: string; code: string };
+
+export type IntegratedReviewSaveInput = {
+  title: string;
+  model: string;
+  promptVersion: string;
+  payload: StoredReviewPayload;
+  sessionIds: string[];
+  evidences: Array<{
+    sessionId: string;
+    messageId: string;
+    quote: string;
+    validated: boolean;
+  }>;
+};
+
+export type IntegratedReviewDeps = {
+  generateStructured: AiProvider["generateStructured"];
+  save: (input: IntegratedReviewSaveInput) => { id: string };
+};
+
+function toStoredEvidence(evidence: ValidatedEvidence): StoredReviewEvidence {
+  return {
+    messageRef: evidence.messageRef,
+    quote: evidence.quote,
+    validated: evidence.validated,
+    messageId: evidence.messageId,
+    sessionId: evidence.sessionId ?? null,
+    sessionTitle: evidence.sessionTitle ?? null,
+    occurredAt: evidence.occurredAt ?? null,
+    role: evidence.role ?? null,
+    reason: evidence.reason,
+  };
+}
+
+function storeItem(
+  text: string,
+  evidence: ValidatedEvidence[],
+  semantic: { valid: boolean; reason: string | null },
+  extra?: { rationale?: string },
+): StoredReviewItem {
+  return {
+    text,
+    evidence: evidence.map(toStoredEvidence),
+    semanticValid: semantic.valid,
+    invalidReason: semantic.reason as StoredReviewItem["invalidReason"],
+    rationale: extra?.rationale,
+  };
+}
+
+export async function runIntegratedReview(
+  sources: ReviewSessionSource[],
+  title: string,
+  deps: IntegratedReviewDeps,
+): Promise<IntegratedReviewResult> {
+  const config = getAiConfig();
+  if (!config.apiKey) {
+    return {
+      ok: false,
+      code: "not_configured",
+      error: "OpenAI APIキーが設定されていません",
+    };
+  }
+  if (config.provider !== "openai") {
+    return {
+      ok: false,
+      code: "unsupported_provider",
+      error: "未対応のAIプロバイダです",
+    };
+  }
+  if (!config.model) {
+    return {
+      ok: false,
+      code: "not_configured",
+      error: "AI_MODEL が設定されていません",
+    };
+  }
+
+  const input = buildIntegratedReviewInput(sources);
+  if (input.analyzableSessionCount < MIN_INTEGRATED_REVIEW_SESSIONS) {
+    return {
+      ok: false,
+      code: "too_few_sessions",
+      error: "統合レビューには2件以上のSessionが必要です",
+    };
+  }
+  if (isIntegratedReviewInputTooLong(input.labeledTranscript)) {
+    return {
+      ok: false,
+      code: "too_long",
+      error:
+        "選択したSessionの合計が、現在のMVPでレビューできる上限を超えています。Sessionを減らしてください。",
+    };
+  }
+
+  let parsedUnknown: unknown;
+  let usedModel = config.model;
+  try {
+    const generated = await deps.generateStructured({
+      model: config.model,
+      system: INTEGRATED_REVIEW_SYSTEM_PROMPT,
+      user: buildIntegratedReviewUserPromptV2(
+        input.labeledTranscript,
+        buildReviewCurrentContextNote(input.sessions),
+      ),
+      schema: integratedReviewV2OutputSchema,
+      schemaName: "integrated_review_v2",
+      timeoutMs: INTEGRATED_REVIEW_TIMEOUT_MS,
+    });
+    parsedUnknown = generated.parsed;
+    usedModel = generated.model || config.model;
+  } catch (error) {
+    const mapped = userMessageForAnalyzeError(error);
+    return {
+      ok: false,
+      code: mapped.code,
+      error:
+        mapped.code === "timeout"
+          ? "統合レビューが時間内に終わりませんでした。Sessionの原文は変更していません。"
+          : mapped.code === "schema"
+            ? "分析結果の形式が不正だったため保存しませんでした。"
+            : "統合レビューに失敗しました。Sessionの原文は変更していません。",
+    };
+  }
+
+  const parsed = integratedReviewV2OutputSchema.safeParse(parsedUnknown);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      code: "schema",
+      error: "分析結果の形式が不正だったため保存しませんでした。",
+    };
+  }
+
+  const resolve = (refs: string[]) =>
+    resolveEvidenceRefs(
+      refs,
+      input.unitsByRef,
+      input.contentByMessageId,
+      MAX_REVIEW_EVIDENCE_REFS_PER_ITEM,
+    );
+
+  const commonThemes = parsed.data.commonThemes
+    .slice(0, MAX_COMMON_THEMES)
+    .map((item) => {
+    const evidence = resolve(item.evidenceRefs);
+    return storeItem(
+      item.text,
+      evidence,
+      validateCommonThemeSupport(evidence, input.unitsByRef),
+    );
+  });
+
+  const shifts: StoredReviewShiftItem[] = parsed.data.shifts.map((item) => {
+    const beforeEvidence = resolve(item.beforeEvidenceRefs);
+    const afterEvidence = resolve(item.afterEvidenceRefs);
+    const evidence = [...beforeEvidence, ...afterEvidence];
+    const semantic = validateShiftSupport(
+      beforeEvidence,
+      afterEvidence,
+      input.unitsByRef,
+      input.sessions,
+    );
+    return {
+      text: item.interpretation,
+      before: item.before,
+      after: item.after,
+      interpretation: item.interpretation,
+      beforeEvidence: beforeEvidence.map(toStoredEvidence),
+      afterEvidence: afterEvidence.map(toStoredEvidence),
+      evidence: evidence.map(toStoredEvidence),
+      semanticValid: semantic.valid,
+      invalidReason: semantic.reason,
+    };
+  });
+
+  const tensions = parsed.data.tensions.map((item) => {
+    const evidence = resolve(item.evidenceRefs);
+    return storeItem(
+      item.text,
+      evidence,
+      validateTensionSupport(evidence, input.unitsByRef),
+    );
+  });
+
+  const crossInsights = parsed.data.crossInsights
+    .slice(0, MAX_CROSS_INSIGHTS)
+    .map((item) => {
+    const evidence = resolve(item.evidenceRefs);
+    return storeItem(
+      item.text,
+      evidence,
+      validateCrossInsightSupport(evidence, input.unitsByRef),
+    );
+  });
+
+  const hypotheses = parsed.data.hypotheses
+    .slice(0, MAX_HYPOTHESES)
+    .map((item) => {
+    const evidence = resolve(item.evidenceRefs);
+    return storeItem(
+      item.text,
+      evidence,
+      validateHypothesisSupport(evidence, input.unitsByRef),
+      { rationale: item.rationale },
+    );
+  });
+
+  const openQuestions = parsed.data.openQuestions
+    .slice(0, MAX_OPEN_QUESTIONS)
+    .map((item) => {
+    const evidence = resolve(item.evidenceRefs);
+    return storeItem(item.text, evidence, validateOptionalEvidence(evidence));
+  });
+
+  const nextQuestions = parsed.data.nextQuestions
+    .slice(0, MAX_NEXT_QUESTIONS)
+    .map((item) => {
+      const evidence = resolve(item.evidenceRefs);
+      return storeItem(item.text, evidence, validateOptionalEvidence(evidence));
+    });
+
+  const allItems = [
+    ...commonThemes,
+    ...shifts,
+    ...tensions,
+    ...crossInsights,
+    ...hypotheses,
+    ...openQuestions,
+    ...nextQuestions,
+  ];
+
+  if (process.env.NODE_ENV !== "production") {
+    for (const item of allItems) {
+      if (item.semanticValid === false) {
+        console.info("integrated-review semantic_support_failed", {
+          reason: item.invalidReason,
+        });
+      }
+    }
+  }
+
+  const payload: StoredReviewPayload = {
+    summary: parsed.data.summary,
+    commonThemes,
+    shifts,
+    tensions,
+    crossInsights,
+    hypotheses,
+    openQuestions,
+    nextQuestions,
+    settings: defaultReviewSettings(config.provider),
+    metrics: {
+      ...computeEvidenceStats(allItems),
+      ...computeSemanticStats(allItems),
+      sessionCount: input.analyzableSessionCount,
+    },
+  };
+
+  const evidences = allItems.flatMap((item) =>
+    item.evidence.flatMap((evidence) => {
+      if (!evidence.messageId || !evidence.sessionId) {
+        return [];
+      }
+      return [
+        {
+          sessionId: evidence.sessionId,
+          messageId: evidence.messageId,
+          quote: evidence.quote,
+          validated: evidence.validated,
+        },
+      ];
+    }),
+  );
+
+  try {
+    const saved = deps.save({
+      title,
+      model: usedModel,
+      promptVersion: INTEGRATED_REVIEW_PROMPT_VERSION,
+      payload,
+      sessionIds: input.sessions.map((session) => session.sessionId),
+      evidences,
+    });
+    return { ok: true, reviewId: saved.id };
+  } catch {
+    console.error("integrated-review save failed", { code: "save" });
+    return {
+      ok: false,
+      code: "save",
+      error: "統合レビューの保存に失敗しました。Sessionの原文は変更していません。",
+    };
+  }
+}
+
+export async function createIntegratedReview(
+  sources: ReviewSessionSource[],
+  title: string,
+): Promise<IntegratedReviewResult> {
+  const { insertReview } = await import("@/lib/db/queries");
+  try {
+    const provider = getAiProvider();
+    return await runIntegratedReview(sources, title, {
+      generateStructured: (request) => provider.generateStructured(request),
+      save: insertReview,
+    });
+  } catch (error) {
+    if (error instanceof AnalyzeSessionError) {
+      return { ok: false, code: error.code, error: error.message };
+    }
+    console.error("integrated-review failed");
+    return {
+      ok: false,
+      code: "api",
+      error: "統合レビューに失敗しました。Sessionの原文は変更していません。",
+    };
+  }
+}

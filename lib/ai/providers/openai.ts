@@ -18,7 +18,7 @@ export function createOpenAiProvider(): AiProvider {
 
       const client = new OpenAI({
         apiKey: config.apiKey,
-        timeout: ANALYZE_SESSION_TIMEOUT_MS,
+        timeout: request.timeoutMs ?? ANALYZE_SESSION_TIMEOUT_MS,
       });
 
       try {
