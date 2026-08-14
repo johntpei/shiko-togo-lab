@@ -75,6 +75,34 @@ function ItemBlock({
     <li>
       <p className="text-sm leading-7 text-ink">{item.text}</p>
       <SupportLabel supportType={item.supportType} />
+      {item.sideA || item.sideB ? (
+        <div className="mt-2 grid gap-3 text-sm leading-7 text-muted">
+          {item.sideA ? (
+            <div>
+              <p>
+                <span className="text-[11px] font-bold">A </span>
+                {item.sideA.text}
+              </p>
+              <ReviewEvidenceList
+                evidence={item.sideA.evidence}
+                showFailureReasons={showFailureReasons}
+              />
+            </div>
+          ) : null}
+          {item.sideB ? (
+            <div>
+              <p>
+                <span className="text-[11px] font-bold">B </span>
+                {item.sideB.text}
+              </p>
+              <ReviewEvidenceList
+                evidence={item.sideB.evidence}
+                showFailureReasons={showFailureReasons}
+              />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {item.rationale ? (
         <>
           <p className="mt-2 text-[11px] font-bold text-muted">
@@ -167,7 +195,11 @@ function ExclusionList({
   items,
 }: {
   title: string;
-  items: Array<{ text: string; invalidReason?: string | null }>;
+  items: Array<{
+    text: string;
+    invalidReason?: string | null;
+    distinctSessionCount?: number;
+  }>;
 }) {
   if (items.length === 0) {
     return null;
@@ -185,6 +217,9 @@ function ExclusionList({
                 {item.invalidReason}
                 {REVIEW_FAILURE_LABELS[item.invalidReason]
                   ? ` / ${REVIEW_FAILURE_LABELS[item.invalidReason]}`
+                  : ""}
+                {typeof item.distinctSessionCount === "number"
+                  ? ` / distinctSessionCount ${item.distinctSessionCount}`
                   : ""}
               </span>
             ) : null}

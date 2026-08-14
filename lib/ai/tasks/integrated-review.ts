@@ -16,7 +16,7 @@ import {
 import {
   INTEGRATED_REVIEW_PROMPT_VERSION,
   INTEGRATED_REVIEW_SYSTEM_PROMPT,
-  buildIntegratedReviewUserPromptV4,
+  buildIntegratedReviewUserPromptV5,
 } from "../prompts/integrated-review";
 import type { AiProvider } from "../provider";
 import { getAiProvider } from "../provider";
@@ -26,7 +26,7 @@ import {
 } from "../review-input";
 import {
   defaultReviewSettings,
-  integratedReviewV4OutputSchema,
+  integratedReviewV5OutputSchema,
   type StoredReviewEvidence,
   type StoredReviewItem,
   type StoredReviewPayload,
@@ -35,7 +35,13 @@ import {
 } from "../review-schemas";
 import { textsAreNearDuplicates } from "../review-quality";
 import {
+  mergeGroupedEvidenceRefs,
+  type EvidenceGroup,
+  type ReviewRelationType,
+} from "../evidence-groups";
+import {
   computeReviewGuardStats,
+  distinctSessionIds,
   validateCommonThemeSupport,
   validateCrossInsightSupport,
   validateHypothesisSupport,
@@ -96,6 +102,10 @@ function storeItem(
     rationale?: string;
     validationIdea?: string;
     supportType?: ReviewSupportType;
+    relationType?: ReviewRelationType;
+    distinctSessionCount?: number;
+    sideA?: StoredReviewItem["sideA"];
+    sideB?: StoredReviewItem["sideB"];
   },
 ): StoredReviewItem {
   return {
@@ -107,6 +117,10 @@ function storeItem(
     supportType: extra?.supportType,
     rationale: extra?.rationale,
     validationIdea: extra?.validationIdea,
+    relationType: extra?.relationType,
+    distinctSessionCount: extra?.distinctSessionCount,
+    sideA: extra?.sideA,
+    sideB: extra?.sideB,
   };
 }
 
@@ -161,9 +175,9 @@ export async function runIntegratedReview(
     const generated = await deps.generateStructured({
       model: config.model,
       system: INTEGRATED_REVIEW_SYSTEM_PROMPT,
-      user: buildIntegratedReviewUserPromptV4(input.labeledTranscript),
-      schema: integratedReviewV4OutputSchema,
-      schemaName: "integrated_review_v4",
+      user: buildIntegratedReviewUserPromptV5(input.labeledTranscript),
+      schema: integratedReviewV5OutputSchema,
+      schemaName: "integrated_review_v5",
       timeoutMs: INTEGRATED_REVIEW_TIMEOUT_MS,
     });
     parsedUnknown = generated.parsed;
@@ -182,7 +196,7 @@ export async function runIntegratedReview(
     };
   }
 
-  const parsed = integratedReviewV4OutputSchema.safeParse(parsedUnknown);
+  const parsed = integratedReviewV5OutputSchema.safeParse(parsedUnknown);
   if (!parsed.success) {
     return {
       ok: false,
@@ -199,15 +213,34 @@ export async function runIntegratedReview(
       MAX_REVIEW_EVIDENCE_REFS_PER_ITEM,
     );
 
+  const refsFromGrouped = (item: {
+    evidenceGroups?: EvidenceGroup[] | null;
+    evidenceRefs?: string[] | null;
+    sideA?: { evidenceRefs: string[] };
+    sideB?: { evidenceRefs: string[] };
+  }) =>
+    mergeGroupedEvidenceRefs(item.evidenceGroups, [
+      ...(item.evidenceRefs ?? []),
+      ...(item.sideA?.evidenceRefs ?? []),
+      ...(item.sideB?.evidenceRefs ?? []),
+    ]);
+
+  const sessionCountFor = (evidence: ValidatedEvidence[]) =>
+    distinctSessionIds(evidence, input.unitsByRef).size;
+
   const commonThemes = parsed.data.commonThemes
     .slice(0, MAX_COMMON_THEMES)
     .map((item) => {
-    const evidence = resolve(item.evidenceRefs);
+    const evidence = resolve(refsFromGrouped(item));
     return storeItem(
       item.text,
       evidence,
       validateCommonThemeSupport(evidence, input.unitsByRef, item.text),
-      { supportType: "cross_session_interpretation" },
+      {
+        supportType: "cross_session_interpretation",
+        relationType: item.relationType,
+        distinctSessionCount: sessionCountFor(evidence),
+      },
     );
   });
 
@@ -233,23 +266,41 @@ export async function runIntegratedReview(
       invalidReason: semantic.reason,
       guardType: semantic.guardType,
       supportType: "direct",
+      distinctSessionCount: sessionCountFor(evidence),
     };
   });
 
   const tensions = parsed.data.tensions.map((item) => {
-    const evidence = resolve(item.evidenceRefs);
+    const sideAEvidence = resolve(item.sideA.evidenceRefs);
+    const sideBEvidence = resolve(item.sideB.evidenceRefs);
+    const evidence = resolve(refsFromGrouped(item));
     return storeItem(
       item.text,
       evidence,
-      validateTensionSupport(evidence, input.unitsByRef, item.text),
-      { supportType: "cross_session_interpretation" },
+      validateTensionSupport(evidence, input.unitsByRef, item.text, {
+        sideA: sideAEvidence,
+        sideB: sideBEvidence,
+      }),
+      {
+        supportType: "cross_session_interpretation",
+        relationType: item.relationType,
+        distinctSessionCount: sessionCountFor(evidence),
+        sideA: {
+          text: item.sideA.text,
+          evidence: sideAEvidence.map(toStoredEvidence),
+        },
+        sideB: {
+          text: item.sideB.text,
+          evidence: sideBEvidence.map(toStoredEvidence),
+        },
+      },
     );
-    });
+  });
 
   const crossInsights = parsed.data.crossInsights
     .slice(0, MAX_CROSS_INSIGHTS)
     .map((item) => {
-    const evidence = resolve(item.evidenceRefs);
+    const evidence = resolve(refsFromGrouped(item));
     const semantic = validateCrossInsightSupport(
       evidence,
       input.unitsByRef,
@@ -270,14 +321,18 @@ export async function runIntegratedReview(
             guardType: "interpretation",
           }
         : semantic,
-      { supportType: "cross_session_interpretation" },
+      {
+        supportType: "cross_session_interpretation",
+        relationType: item.relationType,
+        distinctSessionCount: sessionCountFor(evidence),
+      },
     );
   });
 
   const hypotheses = parsed.data.hypotheses
     .slice(0, MAX_HYPOTHESES)
     .map((item) => {
-    const evidence = resolve(item.evidenceRefs);
+    const evidence = resolve(refsFromGrouped(item));
     return storeItem(
       item.text,
       evidence,
@@ -286,6 +341,8 @@ export async function runIntegratedReview(
         rationale: item.rationale,
         validationIdea: item.validationIdea,
         supportType: "hypothesis",
+        relationType: item.relationType,
+        distinctSessionCount: sessionCountFor(evidence),
       },
     );
   });
@@ -326,6 +383,7 @@ export async function runIntegratedReview(
         console.info("integrated-review semantic_support_failed", {
           reason: item.invalidReason,
           guardType: item.guardType,
+          distinctSessionCount: item.distinctSessionCount,
         });
       }
     }

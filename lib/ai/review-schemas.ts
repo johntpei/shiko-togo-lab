@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { EVIDENCE_FAILURE_REASONS } from "./evidence";
+import { REVIEW_RELATION_TYPES } from "./evidence-groups";
 import { EVIDENCE_ROLES } from "./evidence-units";
 import { INTEGRATED_REVIEW_MAX_INPUT_CHARS } from "./limits";
 
@@ -108,6 +109,56 @@ export const integratedReviewV4OutputSchema = integratedReviewV3OutputSchema;
 
 export type IntegratedReviewV4Output = IntegratedReviewV3Output;
 
+export const reviewEvidenceGroupSchema = z.object({
+  sessionRef: z.string(),
+  evidenceRefs: z.array(z.string()),
+});
+
+export const reviewTensionSideSchema = z.object({
+  text: z.string(),
+  evidenceRefs: z.array(z.string()),
+});
+
+const groupedReviewItemSchema = z.object({
+  text: z.string(),
+  relationType: z.enum(REVIEW_RELATION_TYPES),
+  evidenceGroups: z.array(reviewEvidenceGroupSchema),
+  evidenceRefs: z.array(z.string()),
+});
+
+export const reviewHypothesisV5ItemSchema = z.object({
+  text: z.string(),
+  rationale: z.string(),
+  validationIdea: z.string(),
+  relationType: z.enum(REVIEW_RELATION_TYPES),
+  evidenceGroups: z.array(reviewEvidenceGroupSchema),
+  evidenceRefs: z.array(z.string()),
+});
+
+export const reviewTensionV5ItemSchema = z.object({
+  text: z.string(),
+  relationType: z.enum(REVIEW_RELATION_TYPES),
+  sideA: reviewTensionSideSchema,
+  sideB: reviewTensionSideSchema,
+  evidenceGroups: z.array(reviewEvidenceGroupSchema),
+  evidenceRefs: z.array(z.string()),
+});
+
+export const integratedReviewV5OutputSchema = z.object({
+  summary: z.string(),
+  commonThemes: z.array(groupedReviewItemSchema),
+  shifts: z.array(reviewShiftItemSchema),
+  tensions: z.array(reviewTensionV5ItemSchema),
+  crossInsights: z.array(groupedReviewItemSchema),
+  hypotheses: z.array(reviewHypothesisV5ItemSchema),
+  openQuestions: z.array(reviewItemSchema),
+  nextQuestions: z.array(reviewItemSchema),
+});
+
+export type IntegratedReviewV5Output = z.infer<
+  typeof integratedReviewV5OutputSchema
+>;
+
 export const storedReviewEvidenceSchema = z.object({
   messageRef: z.string(),
   quote: z.string(),
@@ -129,6 +180,20 @@ const storedReviewItemBase = {
   validationIdea: z.string().optional(),
   supportType: z.enum(REVIEW_SUPPORT_TYPES).optional(),
   guardType: z.enum(REVIEW_GUARD_TYPES).optional(),
+  relationType: z.enum(REVIEW_RELATION_TYPES).optional(),
+  distinctSessionCount: z.number().optional(),
+  sideA: z
+    .object({
+      text: z.string(),
+      evidence: z.array(storedReviewEvidenceSchema),
+    })
+    .optional(),
+  sideB: z
+    .object({
+      text: z.string(),
+      evidence: z.array(storedReviewEvidenceSchema),
+    })
+    .optional(),
 };
 
 export const storedReviewItemSchema = z.object(storedReviewItemBase);

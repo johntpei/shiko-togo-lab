@@ -12,6 +12,12 @@ export function isWeakNextQuestion(text: string) {
   if (/今後どうすればよいか/.test(trimmed)) {
     return true;
   }
+  if (/今後どう進めるか/.test(trimmed)) {
+    return true;
+  }
+  if (/何を優先すべきか/.test(trimmed)) {
+    return true;
+  }
   if (/(必要|すべき)ですか[？?]?$/.test(trimmed)) {
     return true;
   }
@@ -106,5 +112,11 @@ export function isPsychologicalOverclaim(text: string) {
     /恐れている/.test(text) ||
     /強く望んでいる/.test(text) ||
     /不安を感じ/.test(text)
+  );
+}
+
+export function claimAssertsUserInnerState(text: string) {
+  return /ユーザーは.{0,24}(気づいた|と考えている|と感じている|と認識している)/.test(
+    text,
   );
 }

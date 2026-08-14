@@ -49,7 +49,7 @@ export default async function NewReviewPage({
         統合レビュー
       </h1>
       <p className="mt-3 text-sm leading-7 text-muted">
-        複数の Session を選び、対話の間にあるつながりを見つけます。新規レビューは integrated-review-v4 です。過去の v1 / v2 / v3 レビューはそのまま残ります。期間や検索は候補を探すためで、Review対象はチェックで決めます。実行はボタンを押したときだけです。
+        複数の Session を選び、対話の間にあるつながりを見つけます。新規レビューは integrated-review-v5 です。過去の v1〜v4 レビューはそのまま残ります。期間や検索は候補を探すためで、Review対象はチェックで決めます。実行はボタンを押したときだけです。
       </p>
       <ReviewSessionPicker
         candidates={candidates}

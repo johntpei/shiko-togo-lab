@@ -67,8 +67,8 @@ function resolve(refs: string[]) {
   };
 }
 
-test("Case C: commonTheme は 2 Session の Evidence なら valid", () => {
-  const { input, evidence } = resolve(["S01:M001:E01", "S02:M001:E01"]);
+test("Case C: commonTheme の S01 + S03 Evidence は valid", () => {
+  const { input, evidence } = resolve(["S01:M001:E01", "S03:M001:E01"]);
   const result = validateCommonThemeSupport(evidence, input.unitsByRef);
   assert.equal(evidence.every((item) => item.validated), true);
   assert.equal(result.valid, true);
@@ -296,4 +296,72 @@ test("Case H: 境界の Next Question は Evidence なしでも valid", () => {
     [],
   );
   assert.equal(result.valid, true);
+});
+
+test("Case E: Tension の sideA と sideB が異なる Session なら valid", () => {
+  const { input } = insightResolve(["S01:M001:E01", "S03:M001:E01"]);
+  const sideA = resolveEvidenceRefs(
+    ["S01:M001:E01"],
+    input.unitsByRef,
+    input.contentByMessageId,
+  );
+  const sideB = resolveEvidenceRefs(
+    ["S03:M001:E01"],
+    input.unitsByRef,
+    input.contentByMessageId,
+  );
+  const result = validateTensionSupport(
+    [...sideA, ...sideB],
+    input.unitsByRef,
+    "自動化と本人判断の境界設定が必要。",
+    { sideA, sideB },
+  );
+  assert.equal(result.valid, true);
+});
+
+test("Case F: Tension 両側が同一 Session なら invalid", () => {
+  const { input } = insightResolve(["S01:M001:E01"]);
+  const sideA = resolveEvidenceRefs(
+    ["S01:M001:E01"],
+    input.unitsByRef,
+    input.contentByMessageId,
+  );
+  const result = validateTensionSupport(
+    sideA,
+    input.unitsByRef,
+    "同一SessionのTension",
+    { sideA, sideB: sideA },
+  );
+  assert.equal(result.valid, false);
+  assert.equal(result.reason, "insufficient_distinct_sessions");
+});
+
+test("Case J: Assistant Evidence だけなのに『ユーザーは気づいた』は invalid", () => {
+  const { input, evidence } = resolve(["S01:M002:E01", "S02:M002:E01"]);
+  assert.equal(evidence.every((item) => item.role === "assistant"), true);
+  const result = validateCrossInsightSupport(
+    evidence,
+    input.unitsByRef,
+    "ユーザーは設計の価値に気づいた。",
+  );
+  assert.equal(result.valid, false);
+  assert.equal(result.reason, "evidence_role_mismatch");
+});
+
+test("Case K: 解釈文なら USER + ASSISTANT Evidence で valid", () => {
+  const { input, evidence } = resolve(["S01:M001:E01", "S02:M002:E01"]);
+  const result = validateCrossInsightSupport(
+    evidence,
+    input.unitsByRef,
+    "複数Sessionを合わせると、運用の設計という構造が見える。",
+  );
+  assert.equal(result.valid, true);
+});
+
+test("Case L: Current Context は distinct session に数えない", () => {
+  const { input, evidence } = resolve(["S01:M001:E01"]);
+  assert.equal(input.unitsByRef.has("CURRENT CONTEXT"), false);
+  const result = validateCommonThemeSupport(evidence, input.unitsByRef);
+  assert.equal(result.valid, false);
+  assert.equal(result.reason, "insufficient_distinct_sessions");
 });

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  claimAssertsUserInnerState,
   claimLeapsToUnmentionedDomain,
   hasUnsupportedExaggeration,
   isGenericCommonTheme,
@@ -100,11 +101,18 @@ test("Case G: Cross Insight と同文の Hypothesis は重複", () => {
 
 test("Case H: 『次のステップは何か？』は弱い Next Question", () => {
   assert.equal(isWeakNextQuestion("次のステップは何か？"), true);
+  assert.equal(isWeakNextQuestion("何を優先すべきか？"), true);
 });
 
-test("Case I: 境界を問う Next Question は適格", () => {
+test("Case J: 『ユーザーは気づいた』は内面主語として検出する", () => {
   assert.equal(
-    isWeakNextQuestion("自動化と本人判断の境界をどこに置くべきか？"),
+    claimAssertsUserInnerState("ユーザーは設計の価値に気づいた。"),
+    true,
+  );
+  assert.equal(
+    claimAssertsUserInnerState(
+      "複数Sessionを合わせると、運用の設計という構造が見える。",
+    ),
     false,
   );
 });

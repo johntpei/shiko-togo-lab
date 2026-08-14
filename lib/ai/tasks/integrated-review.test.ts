@@ -50,6 +50,11 @@ const validOutput = {
   commonThemes: [
     {
       text: "仕組みに価値を置く方向が繰り返されている。",
+      relationType: "repetition",
+      evidenceGroups: [
+        { sessionRef: "S01", evidenceRefs: ["S01:M001:E01"] },
+        { sessionRef: "S02", evidenceRefs: ["S02:M001:E01"] },
+      ],
       evidenceRefs: ["S01:M001:E01", "S02:M001:E01"],
     },
   ],
@@ -65,12 +70,27 @@ const validOutput = {
   tensions: [
     {
       text: "自由と締切は両立条件を考えるポイントになる。",
+      relationType: "contrast",
+      sideA: {
+        text: "自由に考えたい",
+        evidenceRefs: ["S01:M001:E01"],
+      },
+      sideB: {
+        text: "締切があると動きやすい",
+        evidenceRefs: ["S02:M001:E01"],
+      },
+      evidenceGroups: [],
       evidenceRefs: ["S01:M001:E01", "S02:M001:E01"],
     },
   ],
   crossInsights: [
     {
       text: "これらのSessionを合わせると、運用の設計が主題になっている。",
+      relationType: "complement",
+      evidenceGroups: [
+        { sessionRef: "S01", evidenceRefs: ["S01:M001:E01"] },
+        { sessionRef: "S02", evidenceRefs: ["S02:M001:E01"] },
+      ],
       evidenceRefs: ["S01:M001:E01", "S02:M001:E01"],
     },
   ],
@@ -80,6 +100,11 @@ const validOutput = {
       rationale: "自由と締切の両方を本人が述べているため。",
       validationIdea:
         "締切を自分で置いた週と置かなかった週で、実際に進んだ作業量を比較する。",
+      relationType: "complement",
+      evidenceGroups: [
+        { sessionRef: "S01", evidenceRefs: ["S01:M001:E01"] },
+        { sessionRef: "S02", evidenceRefs: ["S02:M001:E01"] },
+      ],
       evidenceRefs: ["S01:M001:E01", "S02:M001:E01"],
     },
   ],
@@ -130,7 +155,7 @@ test("Case A: 2 Session 選択なら Review 可能", async () => {
     const result = await runIntegratedReview(twoSessions, "統合レビュー — テスト", {
       generateStructured: async (request) => {
         called = true;
-        assert.equal(request.schemaName, "integrated_review_v4");
+        assert.equal(request.schemaName, "integrated_review_v5");
         const contextIdx = request.user.indexOf("CURRENT CONTEXT");
         const sessionIdx = request.user.indexOf("SESSION S01");
         assert.ok(contextIdx >= 0 && sessionIdx > contextIdx);
@@ -156,6 +181,7 @@ test("Case A: 2 Session 選択なら Review 可能", async () => {
         assert.equal(input.payload.hypotheses[0]?.supportType, "hypothesis");
         assert.equal(input.payload.shifts[0]?.supportType, "direct");
         assert.equal(input.payload.shifts[0]?.guardType, "hard");
+        assert.equal(input.payload.commonThemes[0]?.distinctSessionCount, 2);
         assert.equal(input.sessionIds.includes("s1"), true);
         assert.equal(input.sessionIds.includes("s2"), true);
         return { id: "review-1" };
@@ -237,6 +263,10 @@ test("1 Session だけの commonTheme は保存されるが semantic invalid", a
           commonThemes: [
             {
               text: "1 Sessionだけのテーマ",
+              relationType: "repetition",
+              evidenceGroups: [
+                { sessionRef: "S01", evidenceRefs: ["S01:M001:E01"] },
+              ],
               evidenceRefs: ["S01:M001:E01"],
             },
           ],
@@ -266,6 +296,10 @@ test("存在しない EvidenceRef は semantic invalid のまま保存しカテ�
           crossInsights: [
             {
               text: "不正参照",
+              relationType: "complement",
+              evidenceGroups: [
+                { sessionRef: "S09", evidenceRefs: ["S09:M001:E01"] },
+              ],
               evidenceRefs: ["S09:M001:E01"],
             },
           ],
@@ -312,6 +346,11 @@ test("v3: commonThemes は最大3件", async () => {
           ...validOutput,
           commonThemes: [1, 2, 3, 4].map((n) => ({
             text: `テーマ${n}`,
+            relationType: "repetition" as const,
+            evidenceGroups: [
+              { sessionRef: "S01", evidenceRefs: ["S01:M001:E01"] },
+              { sessionRef: "S02", evidenceRefs: ["S02:M001:E01"] },
+            ],
             evidenceRefs: ["S01:M001:E01", "S02:M001:E01"],
           })),
         },
@@ -336,6 +375,11 @@ test("v3: hypotheses は最大2件", async () => {
             text: `仮説${n}`,
             rationale: "根拠があるため。",
             validationIdea: `比較${n}で確認する。`,
+            relationType: "complement" as const,
+            evidenceGroups: [
+              { sessionRef: "S01", evidenceRefs: ["S01:M001:E01"] },
+              { sessionRef: "S02", evidenceRefs: ["S02:M001:E01"] },
+            ],
             evidenceRefs: ["S01:M001:E01", "S02:M001:E01"],
           })),
         },
@@ -412,6 +456,11 @@ test("Case C: 顧客獲得への飛躍 Cross Insight は Hard Guard で除外", 
           crossInsights: [
             {
               text: "このサービスは顧客獲得増加につながる。",
+              relationType: "complement",
+              evidenceGroups: [
+                { sessionRef: "S01", evidenceRefs: ["S01:M001:E01"] },
+                { sessionRef: "S02", evidenceRefs: ["S02:M001:E01"] },
+              ],
               evidenceRefs: ["S01:M001:E01", "S02:M001:E01"],
             },
           ],
@@ -438,12 +487,22 @@ test("Case J: Cross Insight と Common Theme が実質同じなら重複除外",
           commonThemes: [
             {
               text: "人間側の運用設計が繰り返し重要視されている。",
+              relationType: "repetition",
+              evidenceGroups: [
+                { sessionRef: "S01", evidenceRefs: ["S01:M001:E01"] },
+                { sessionRef: "S02", evidenceRefs: ["S02:M001:E01"] },
+              ],
               evidenceRefs: ["S01:M001:E01", "S02:M001:E01"],
             },
           ],
           crossInsights: [
             {
               text: "人間側の運用設計が繰り返し重要視されている。",
+              relationType: "complement",
+              evidenceGroups: [
+                { sessionRef: "S01", evidenceRefs: ["S01:M001:E01"] },
+                { sessionRef: "S02", evidenceRefs: ["S02:M001:E01"] },
+              ],
               evidenceRefs: ["S01:M001:E01", "S02:M001:E01"],
             },
           ],
@@ -487,6 +546,363 @@ test("Case G / H: 弱い Next Question は除外し、境界の問いは残す",
           "weak_next_question",
         );
         assert.equal(input.payload.nextQuestions[1]?.semanticValid, true);
+        return { id: "review-1" };
+      },
+    });
+    assert.equal(result.ok, true);
+  });
+});
+
+test("Case A: evidenceGroups の S01 と S02 は flatten されて valid", async () => {
+  await withReviewEnv(async () => {
+    const result = await runIntegratedReview(twoSessions, "統合レビュー — テスト", {
+      generateStructured: async () => ({
+        parsed: {
+          ...validOutput,
+          crossInsights: [
+            {
+              text: "複数Sessionを合わせると、人間側の知見管理がボトルネックという構造が見える。",
+              relationType: "complement",
+              evidenceGroups: [
+                { sessionRef: "S01", evidenceRefs: ["S01:M001:E01"] },
+                { sessionRef: "S02", evidenceRefs: ["S02:M001:E01"] },
+              ],
+              evidenceRefs: ["S01:M001:E01", "S02:M001:E01"],
+            },
+          ],
+        },
+        model: "test-model",
+      }),
+      save: (input) => {
+        assert.equal(input.payload.crossInsights[0]?.semanticValid, true);
+        assert.equal(input.payload.crossInsights[0]?.distinctSessionCount, 2);
+        assert.equal(input.payload.crossInsights[0]?.evidence.length, 2);
+        return { id: "review-1" };
+      },
+    });
+    assert.equal(result.ok, true);
+  });
+});
+
+test("Case B: Cross Insight の Evidence が 1 Session だけなら invalid", async () => {
+  await withReviewEnv(async () => {
+    const result = await runIntegratedReview(twoSessions, "統合レビュー — テスト", {
+      generateStructured: async () => ({
+        parsed: {
+          ...validOutput,
+          crossInsights: [
+            {
+              text: "1 Sessionだけの洞察",
+              relationType: "complement",
+              evidenceGroups: [
+                { sessionRef: "S01", evidenceRefs: ["S01:M001:E01"] },
+              ],
+              evidenceRefs: ["S01:M001:E01"],
+            },
+          ],
+        },
+        model: "test-model",
+      }),
+      save: (input) => {
+        assert.equal(input.payload.crossInsights[0]?.semanticValid, false);
+        assert.equal(
+          input.payload.crossInsights[0]?.invalidReason,
+          "insufficient_distinct_sessions",
+        );
+        assert.equal(input.payload.crossInsights[0]?.distinctSessionCount, 1);
+        return { id: "review-1" };
+      },
+    });
+    assert.equal(result.ok, true);
+  });
+});
+
+test("Case F: Tension 両側が S01 のみなら invalid", async () => {
+  await withReviewEnv(async () => {
+    const result = await runIntegratedReview(twoSessions, "統合レビュー — テスト", {
+      generateStructured: async () => ({
+        parsed: {
+          ...validOutput,
+          tensions: [
+            {
+              text: "同一SessionのTension",
+              relationType: "contrast",
+              sideA: { text: "A", evidenceRefs: ["S01:M001:E01"] },
+              sideB: { text: "B", evidenceRefs: ["S01:M002:E01"] },
+              evidenceGroups: [],
+              evidenceRefs: ["S01:M001:E01", "S01:M002:E01"],
+            },
+          ],
+        },
+        model: "test-model",
+      }),
+      save: (input) => {
+        assert.equal(input.payload.tensions[0]?.semanticValid, false);
+        assert.equal(
+          input.payload.tensions[0]?.invalidReason,
+          "insufficient_distinct_sessions",
+        );
+        return { id: "review-1" };
+      },
+    });
+    assert.equal(result.ok, true);
+  });
+});
+
+test("Case J: 『ユーザーは気づいた』は USER Evidence が無ければ invalid", async () => {
+  await withReviewEnv(async () => {
+    const result = await runIntegratedReview(twoSessions, "統合レビュー — テスト", {
+      generateStructured: async () => ({
+        parsed: {
+          ...validOutput,
+          crossInsights: [
+            {
+              text: "ユーザーは設計の価値に気づいた。",
+              relationType: "complement",
+              evidenceGroups: [
+                { sessionRef: "S01", evidenceRefs: ["S01:M002:E01"] },
+                { sessionRef: "S02", evidenceRefs: ["S02:M002:E01"] },
+              ],
+              evidenceRefs: ["S01:M002:E01", "S02:M002:E01"],
+            },
+          ],
+        },
+        model: "test-model",
+      }),
+      save: (input) => {
+        assert.equal(input.payload.crossInsights[0]?.semanticValid, false);
+        assert.equal(
+          input.payload.crossInsights[0]?.invalidReason,
+          "evidence_role_mismatch",
+        );
+        return { id: "review-1" };
+      },
+    });
+    assert.equal(result.ok, true);
+  });
+});
+
+const threeSessions = [
+  ...twoSessions,
+  source("s3", "Session C", "2026-08-10", [
+    message("u3", "user", "過去の会話を次の対話へ再利用したいです。"),
+  ]),
+];
+
+test("Case C: Common Theme の S01 + S03 Evidence は valid", async () => {
+  await withReviewEnv(async () => {
+    const result = await runIntegratedReview(threeSessions, "統合レビュー — テスト", {
+      generateStructured: async () => ({
+        parsed: {
+          ...validOutput,
+          commonThemes: [
+            {
+              text: "知見の再利用が繰り返し重要な論点として現れている。",
+              relationType: "repetition",
+              evidenceGroups: [
+                { sessionRef: "S01", evidenceRefs: ["S01:M001:E01"] },
+                { sessionRef: "S03", evidenceRefs: ["S03:M001:E01"] },
+              ],
+              evidenceRefs: ["S01:M001:E01", "S03:M001:E01"],
+            },
+          ],
+        },
+        model: "test-model",
+      }),
+      save: (input) => {
+        assert.equal(input.payload.commonThemes[0]?.semanticValid, true);
+        assert.equal(input.payload.commonThemes[0]?.distinctSessionCount, 2);
+        return { id: "review-1" };
+      },
+    });
+    assert.equal(result.ok, true);
+  });
+});
+
+test("Case E: Tension の sideA=S01 / sideB=S03 は valid", async () => {
+  await withReviewEnv(async () => {
+    const result = await runIntegratedReview(threeSessions, "統合レビュー — テスト", {
+      generateStructured: async () => ({
+        parsed: {
+          ...validOutput,
+          tensions: [
+            {
+              text: "自動化と本人判断の境界設定が必要な構造になっている。",
+              relationType: "contrast",
+              sideA: { text: "自由に考えたい", evidenceRefs: ["S01:M001:E01"] },
+              sideB: {
+                text: "知見を再利用したい",
+                evidenceRefs: ["S03:M001:E01"],
+              },
+              evidenceGroups: [],
+              evidenceRefs: ["S01:M001:E01", "S03:M001:E01"],
+            },
+          ],
+        },
+        model: "test-model",
+      }),
+      save: (input) => {
+        assert.equal(input.payload.tensions[0]?.semanticValid, true);
+        assert.equal(input.payload.tensions[0]?.sideA?.text, "自由に考えたい");
+        assert.equal(input.payload.tensions[0]?.distinctSessionCount, 2);
+        return { id: "review-1" };
+      },
+    });
+    assert.equal(result.ok, true);
+  });
+});
+
+test("Case G: Hypothesis は 2 Session の Evidence と rationale / validationIdea があれば valid", async () => {
+  await withReviewEnv(async () => {
+    const result = await runIntegratedReview(twoSessions, "統合レビュー — テスト", {
+      generateStructured: async () => ({
+        parsed: {
+          ...validOutput,
+          hypotheses: [
+            {
+              text: "自分で期限を置くと進みやすい可能性がある。",
+              rationale: "自由と締切の両方を本人が述べているため。",
+              validationIdea:
+                "締切を自分で置いた週と置かなかった週で作業量を比較する。",
+              relationType: "complement",
+              evidenceGroups: [
+                { sessionRef: "S01", evidenceRefs: ["S01:M001:E01"] },
+                { sessionRef: "S02", evidenceRefs: ["S02:M001:E01"] },
+              ],
+              evidenceRefs: ["S01:M001:E01", "S02:M001:E01"],
+            },
+          ],
+        },
+        model: "test-model",
+      }),
+      save: (input) => {
+        assert.equal(input.payload.hypotheses[0]?.semanticValid, true);
+        assert.equal(input.payload.hypotheses[0]?.distinctSessionCount, 2);
+        assert.ok(input.payload.hypotheses[0]?.rationale);
+        assert.ok(input.payload.hypotheses[0]?.validationIdea);
+        return { id: "review-1" };
+      },
+    });
+    assert.equal(result.ok, true);
+  });
+});
+
+test("Case H: 2 Session目の Evidence が無いのに fake ref を付けると invalid", async () => {
+  await withReviewEnv(async () => {
+    const result = await runIntegratedReview(twoSessions, "統合レビュー — テスト", {
+      generateStructured: async () => ({
+        parsed: {
+          ...validOutput,
+          crossInsights: [
+            {
+              text: "複数Sessionを合わせると再利用の構造が見える。",
+              relationType: "complement",
+              evidenceGroups: [
+                { sessionRef: "S01", evidenceRefs: ["S01:M001:E01"] },
+                { sessionRef: "S03", evidenceRefs: ["S03:M001:E01"] },
+              ],
+              evidenceRefs: ["S01:M001:E01", "S03:M001:E01"],
+            },
+          ],
+        },
+        model: "test-model",
+      }),
+      save: (input) => {
+        assert.equal(input.payload.crossInsights[0]?.semanticValid, false);
+        assert.equal(
+          input.payload.crossInsights[0]?.invalidReason,
+          "invalid_evidence_ref",
+        );
+        return { id: "review-1" };
+      },
+    });
+    assert.equal(result.ok, true);
+  });
+});
+
+test("Case K: 解釈文なら USER + ASSISTANT Evidence で valid", async () => {
+  await withReviewEnv(async () => {
+    const result = await runIntegratedReview(twoSessions, "統合レビュー — テスト", {
+      generateStructured: async () => ({
+        parsed: {
+          ...validOutput,
+          crossInsights: [
+            {
+              text: "複数Sessionを合わせると、運用の設計という構造が見える。",
+              relationType: "complement",
+              evidenceGroups: [
+                { sessionRef: "S01", evidenceRefs: ["S01:M001:E01"] },
+                { sessionRef: "S02", evidenceRefs: ["S02:M002:E01"] },
+              ],
+              evidenceRefs: ["S01:M001:E01", "S02:M002:E01"],
+            },
+          ],
+        },
+        model: "test-model",
+      }),
+      save: (input) => {
+        assert.equal(input.payload.crossInsights[0]?.semanticValid, true);
+        return { id: "review-1" };
+      },
+    });
+    assert.equal(result.ok, true);
+  });
+});
+
+test("Case L: Current Context は distinct session に数えない", async () => {
+  await withReviewEnv(async () => {
+    const result = await runIntegratedReview(twoSessions, "統合レビュー — テスト", {
+      generateStructured: async (request) => {
+        assert.match(request.user, /CURRENT CONTEXT/);
+        assert.match(request.user, /not Evidence/);
+        return {
+          parsed: {
+            ...validOutput,
+            commonThemes: [
+              {
+                text: "Current Contextを足しても1 Sessionのまま",
+                relationType: "repetition",
+                evidenceGroups: [
+                  { sessionRef: "S01", evidenceRefs: ["S01:M001:E01"] },
+                ],
+                evidenceRefs: ["S01:M001:E01"],
+              },
+            ],
+          },
+          model: "test-model",
+        };
+      },
+      save: (input) => {
+        assert.equal(input.payload.commonThemes[0]?.semanticValid, false);
+        assert.equal(
+          input.payload.commonThemes[0]?.invalidReason,
+          "insufficient_distinct_sessions",
+        );
+        assert.equal(input.payload.commonThemes[0]?.distinctSessionCount, 1);
+        return { id: "review-1" };
+      },
+    });
+    assert.equal(result.ok, true);
+  });
+});
+
+test("Case M: Cross Insight を材料にした具体的 Next Question は残る", async () => {
+  await withReviewEnv(async () => {
+    const result = await runIntegratedReview(twoSessions, "統合レビュー — テスト", {
+      generateStructured: async () => ({
+        parsed: {
+          ...validOutput,
+          nextQuestions: [
+            {
+              text: "専用ツールは、保存・統合・再利用のどこを最も優先して人間側の負担を減らすべきか？",
+              evidenceRefs: [],
+            },
+          ],
+        },
+        model: "test-model",
+      }),
+      save: (input) => {
+        assert.equal(input.payload.nextQuestions[0]?.semanticValid, true);
         return { id: "review-1" };
       },
     });

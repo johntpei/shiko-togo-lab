@@ -2,6 +2,7 @@ import type { ValidatedEvidence } from "./evidence";
 import type { EvidenceUnit } from "./evidence-units";
 import type { ReviewSessionMeta } from "./review-input";
 import {
+  claimAssertsUserInnerState,
   claimLeapsToUnmentionedDomain,
   hasUnsupportedExaggeration,
   isGenericCommonTheme,
@@ -81,6 +82,20 @@ function interpretationQuality(
   }
   if (claimLeapsToUnmentionedDomain(claim, evidenceCorpus(evidence))) {
     return { valid: false, reason: "domain_leap", guardType: "hard" };
+  }
+  if (claimAssertsUserInnerState(claim) && !hasUserEvidence(evidence)) {
+    if (hasValidatedEvidence(evidence)) {
+      return {
+        valid: false,
+        reason: "evidence_role_mismatch",
+        guardType: "hard",
+      };
+    }
+    return {
+      valid: false,
+      reason: "missing_user_evidence",
+      guardType: "hard",
+    };
   }
   if (isPsychologicalOverclaim(claim)) {
     return {
@@ -180,9 +195,31 @@ export function validateTensionSupport(
   evidence: ValidatedEvidence[],
   unitsByRef: Map<string, EvidenceUnit>,
   claim?: string,
+  sides?: {
+    sideA: ValidatedEvidence[];
+    sideB: ValidatedEvidence[];
+  },
 ): ReviewSemanticResult {
   if (hasInvalidRef(evidence)) {
     return hardInvalidRef();
+  }
+  if (sides) {
+    if (hasInvalidRef(sides.sideA) || hasInvalidRef(sides.sideB)) {
+      return hardInvalidRef();
+    }
+    const sideASessions = distinctSessionIds(sides.sideA, unitsByRef);
+    const sideBSessions = distinctSessionIds(sides.sideB, unitsByRef);
+    if (
+      sideASessions.size === 1 &&
+      sideBSessions.size === 1 &&
+      [...sideASessions][0] === [...sideBSessions][0]
+    ) {
+      return {
+        valid: false,
+        reason: "insufficient_distinct_sessions",
+        guardType: "interpretation",
+      };
+    }
   }
   const quality = interpretationQuality(claim, evidence);
   if (quality?.guardType === "hard") {
