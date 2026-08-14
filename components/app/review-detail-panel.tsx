@@ -1,11 +1,17 @@
 import type { ReactNode } from "react";
 import type {
-  ReviewSupportType,
   StoredReviewItem,
   StoredReviewPayload,
   StoredReviewShiftItem,
 } from "@/lib/ai/review-schemas";
 import { ReviewEvidenceList } from "@/components/app/review-evidence-list";
+import {
+  formatEvidenceMetric,
+  formatHardGuardExcluded,
+  formatInterpretationMetric,
+  supportTypeLabel,
+  type ReviewDisplayKind,
+} from "@/lib/reviews/review-display";
 
 const REVIEW_FAILURE_LABELS: Record<string, string> = {
   insufficient_distinct_sessions: "複数Sessionの根拠がありません",
@@ -22,12 +28,6 @@ const REVIEW_FAILURE_LABELS: Record<string, string> = {
   duplicate_interpretation: "他の項目と重複しています",
 };
 
-const SUPPORT_LABELS: Record<ReviewSupportType, string> = {
-  direct: "確認できたこと",
-  cross_session_interpretation: "AIによる横断的な解釈",
-  hypothesis: "まだ確認されていない仮説",
-};
-
 function formatAnalyzedAt(iso: string) {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) {
@@ -39,10 +39,6 @@ function formatAnalyzedAt(iso: string) {
   }).format(date);
 }
 
-function formatPercent(rate: number) {
-  return `${Math.round(rate * 100)}%`;
-}
-
 function visibleItems<T extends { semanticValid?: boolean }>(items: T[]) {
   return items.filter((item) => item.semanticValid !== false);
 }
@@ -51,30 +47,35 @@ function hiddenItems<T extends { semanticValid?: boolean }>(items: T[]) {
   return items.filter((item) => item.semanticValid === false);
 }
 
-function SupportLabel({ supportType }: { supportType?: ReviewSupportType }) {
-  if (!supportType) {
+function SupportLabel({
+  kind,
+  supportType,
+}: {
+  kind: ReviewDisplayKind;
+  supportType?: StoredReviewItem["supportType"];
+}) {
+  const label = supportTypeLabel(kind, supportType);
+  if (!label) {
     return null;
   }
-  return (
-    <p className="mt-1 text-[11px] font-bold text-muted">
-      {SUPPORT_LABELS[supportType]}
-    </p>
-  );
+  return <p className="mt-1 text-[11px] font-bold text-muted">{label}</p>;
 }
 
 function ItemBlock({
   item,
+  kind,
   caption,
   showFailureReasons,
 }: {
   item: StoredReviewItem;
+  kind: ReviewDisplayKind;
   caption?: string;
   showFailureReasons: boolean;
 }) {
   return (
     <li>
       <p className="text-sm leading-7 text-ink">{item.text}</p>
-      <SupportLabel supportType={item.supportType} />
+      <SupportLabel kind={kind} supportType={item.supportType} />
       {item.sideA || item.sideB ? (
         <div className="mt-2 grid gap-3 text-sm leading-7 text-muted">
           {item.sideA ? (
@@ -147,7 +148,10 @@ function ShiftBlock({
       <p className="mt-3 text-[11px] font-bold text-muted">現在</p>
       <p className="mt-1 text-sm leading-7 text-ink">{item.after}</p>
       <p className="mt-3 text-sm leading-7 text-ink">{item.interpretation}</p>
-      <SupportLabel supportType={item.supportType ?? "direct"} />
+      <SupportLabel
+        kind="shift"
+        supportType={item.supportType ?? "direct"}
+      />
       <ReviewEvidenceList
         evidence={item.evidence}
         showFailureReasons={showFailureReasons}
@@ -272,6 +276,17 @@ export function ReviewDetailPanel({
   const hasGuardMetrics =
     typeof metrics?.hardItemCount === "number" ||
     typeof metrics?.interpretationItemCount === "number";
+  const qualityLine = [
+    formatEvidenceMetric(metrics),
+    hasGuardMetrics
+      ? formatInterpretationMetric(metrics)
+      : metrics?.semanticItemCount
+        ? `意味的根拠 ${metrics.semanticValidCount}/${metrics.semanticItemCount}（${Math.round((metrics.semanticValidationRate ?? 0) * 100)}%）`
+        : null,
+    hasGuardMetrics ? formatHardGuardExcluded(metrics) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const level1 = shifts.length > 0;
   const level2 = themes.length > 0 || tensions.length > 0 || insights.length > 0;
   const level3 =
@@ -287,51 +302,20 @@ export function ReviewDetailPanel({
       <h2 className="mt-2 text-xl font-black tracking-tight text-ink">
         {title}
       </h2>
-      <p className="mt-3 text-[11px] text-muted">
+      <p className="mt-3 text-[11px] leading-6 text-muted">
         作成 {formatAnalyzedAt(createdAt)}
-        <span className="mx-2 text-line">/</span>
+        <span className="mx-2 text-line">·</span>
         {sessionCount} Sessions
-        <span className="mx-2 text-line">/</span>
-        使用モデル {model}
-        <span className="mx-2 text-line">/</span>
-        {promptVersion}
-        {metrics && metrics.evidenceCount > 0 ? (
-          <>
-            <span className="mx-2 text-line">/</span>
-            根拠 {metrics.validatedCount}/{metrics.evidenceCount}（
-            {formatPercent(metrics.validationRate)}）
-          </>
-        ) : null}
-        {hasGuardMetrics ? (
-          <>
-            {typeof metrics?.hardItemCount === "number" ? (
-              <>
-                <span className="mx-2 text-line">/</span>
-                Hard Guard {metrics.hardValidCount}/{metrics.hardItemCount}
-                {metrics.hardItemCount > 0
-                  ? `（${formatPercent(metrics.hardValidationRate ?? 0)}）`
-                  : ""}
-              </>
-            ) : null}
-            {typeof metrics?.interpretationItemCount === "number" ? (
-              <>
-                <span className="mx-2 text-line">/</span>
-                Interpretation Support {metrics.interpretationValidCount}/
-                {metrics.interpretationItemCount}
-                {metrics.interpretationItemCount > 0
-                  ? `（${formatPercent(metrics.interpretationValidationRate ?? 0)}）`
-                  : ""}
-              </>
-            ) : null}
-          </>
-        ) : metrics?.semanticItemCount ? (
-          <>
-            <span className="mx-2 text-line">/</span>
-            意味的根拠 {metrics.semanticValidCount}/{metrics.semanticItemCount}
-            （{formatPercent(metrics.semanticValidationRate ?? 0)}）
-          </>
-        ) : null}
       </p>
+      <div className="mt-3 rounded-xl border border-line bg-canvas px-3 py-2 text-[11px] leading-6 text-muted">
+        <p className="font-bold tracking-[0.16em]">分析情報</p>
+        <p className="mt-1">
+          {model}
+          <span className="mx-2 text-line">·</span>
+          {promptVersion}
+        </p>
+        {qualityLine ? <p>{qualityLine}</p> : null}
+      </div>
 
       <section className="mt-6">
         <h3 className="border-b border-line pb-2 text-sm font-bold text-ink">
@@ -363,6 +347,7 @@ export function ReviewDetailPanel({
               {insights.map((item, index) => (
                 <ItemBlock
                   key={`insight-${index}`}
+                  kind="insight"
                   item={item}
                   showFailureReasons={showFailureReasons}
                 />
@@ -374,6 +359,7 @@ export function ReviewDetailPanel({
               {themes.map((item, index) => (
                 <ItemBlock
                   key={`theme-${index}`}
+                  kind="theme"
                   item={item}
                   showFailureReasons={showFailureReasons}
                 />
@@ -385,6 +371,7 @@ export function ReviewDetailPanel({
               {tensions.map((item, index) => (
                 <ItemBlock
                   key={`tension-${index}`}
+                  kind="tension"
                   item={item}
                   caption="両立条件を考えるポイント"
                   showFailureReasons={showFailureReasons}
@@ -402,6 +389,7 @@ export function ReviewDetailPanel({
               {hypotheses.map((item, index) => (
                 <ItemBlock
                   key={`hyp-${index}`}
+                  kind="hypothesis"
                   item={item}
                   showFailureReasons={showFailureReasons}
                 />
@@ -413,6 +401,7 @@ export function ReviewDetailPanel({
               {openQuestions.map((item, index) => (
                 <ItemBlock
                   key={`open-${index}`}
+                  kind="openQuestion"
                   item={item}
                   showFailureReasons={showFailureReasons}
                 />
