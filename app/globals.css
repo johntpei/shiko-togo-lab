@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #172033;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-noto-sans-jp);
+  --color-ink: #172033;
+  --color-muted: #64748b;
+  --color-line: #e2e8f0;
+  --color-canvas: #f8fafc;
+  --color-brand: #2563eb;
+  --color-brand-dark: #1e3a8a;
+  --color-brand-soft: #eff6ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-noto-sans-jp), "Hiragino Sans", "Yu Gothic UI",
+    sans-serif;
+  line-height: 1.75;
+}
+
+::selection {
+  background: #bfdbfe;
+  color: #172033;
+}
+
+.dot-grid {
+  background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+@media print {
+  section,
+  article {
+    break-inside: avoid;
+  }
+
+  .print-hidden {
+    display: none;
+  }
+}
