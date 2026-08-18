@@ -10,6 +10,8 @@ import {
   currentProjectContext,
   type CurrentProjectContext,
 } from "@/lib/app/current-context";
+import { formatReviewItemIndex, reviewItemSourceRef } from "@/lib/reviews/item-source-ref";
+import { isVisibleReviewItem } from "@/lib/reviews/visible-items";
 import type { ContextCandidate } from "./schema";
 
 export type ContextPackSessionSource = {
@@ -41,13 +43,7 @@ const USER_FACT_HINTS = [
   "スコープ",
 ];
 
-function pad(index: number) {
-  return String(index + 1).padStart(2, "0");
-}
-
-export function isVisibleReviewItem(item: { semanticValid?: boolean }) {
-  return item.semanticValid !== false;
-}
+export { isVisibleReviewItem };
 
 function hasValidatedUserEvidence(evidence: StoredReviewEvidence[] | undefined) {
   return (evidence ?? []).some(
@@ -163,9 +159,12 @@ export function buildContextCandidates(input: BuildContextCandidatesInput) {
     sourceReviewId: input.reviewId,
   });
 
-  payload.shifts.filter(isVisibleReviewItem).forEach((item, index) => {
+  payload.shifts.forEach((item, index) => {
+    if (!isVisibleReviewItem(item)) {
+      return;
+    }
     candidates.push({
-      ref: `R:SHIFT:${pad(index)}`,
+      ref: reviewItemSourceRef("shift", index),
       type: "shift",
       text: item.interpretation,
       supportType: "confirmed",
@@ -181,10 +180,13 @@ export function buildContextCandidates(input: BuildContextCandidatesInput) {
     } satisfies ContextCandidate);
   });
 
-  payload.commonThemes.filter(isVisibleReviewItem).forEach((item, index) => {
+  payload.commonThemes.forEach((item, index) => {
+    if (!isVisibleReviewItem(item)) {
+      return;
+    }
     candidates.push(
       reviewItemCandidate(item, {
-        ref: `R:THEME:${pad(index)}`,
+        ref: reviewItemSourceRef("theme", index),
         type: "theme",
         supportType: "cross_session_interpretation",
         reviewId: input.reviewId,
@@ -192,10 +194,13 @@ export function buildContextCandidates(input: BuildContextCandidatesInput) {
     );
   });
 
-  payload.tensions.filter(isVisibleReviewItem).forEach((item, index) => {
+  payload.tensions.forEach((item, index) => {
+    if (!isVisibleReviewItem(item)) {
+      return;
+    }
     candidates.push(
       reviewItemCandidate(item, {
-        ref: `R:TENSION:${pad(index)}`,
+        ref: reviewItemSourceRef("tension", index),
         type: "tension",
         supportType: "cross_session_interpretation",
         reviewId: input.reviewId,
@@ -203,10 +208,13 @@ export function buildContextCandidates(input: BuildContextCandidatesInput) {
     );
   });
 
-  payload.crossInsights.filter(isVisibleReviewItem).forEach((item, index) => {
+  payload.crossInsights.forEach((item, index) => {
+    if (!isVisibleReviewItem(item)) {
+      return;
+    }
     candidates.push(
       reviewItemCandidate(item, {
-        ref: `R:INSIGHT:${pad(index)}`,
+        ref: reviewItemSourceRef("insight", index),
         type: "insight",
         supportType: "cross_session_interpretation",
         reviewId: input.reviewId,
@@ -214,10 +222,13 @@ export function buildContextCandidates(input: BuildContextCandidatesInput) {
     );
   });
 
-  payload.hypotheses.filter(isVisibleReviewItem).forEach((item, index) => {
+  payload.hypotheses.forEach((item, index) => {
+    if (!isVisibleReviewItem(item)) {
+      return;
+    }
     candidates.push(
       reviewItemCandidate(item, {
-        ref: `R:HYPOTHESIS:${pad(index)}`,
+        ref: reviewItemSourceRef("hypothesis", index),
         type: "hypothesis",
         supportType: "hypothesis",
         reviewId: input.reviewId,
@@ -225,10 +236,13 @@ export function buildContextCandidates(input: BuildContextCandidatesInput) {
     );
   });
 
-  payload.openQuestions.filter(isVisibleReviewItem).forEach((item, index) => {
+  payload.openQuestions.forEach((item, index) => {
+    if (!isVisibleReviewItem(item)) {
+      return;
+    }
     candidates.push(
       reviewItemCandidate(item, {
-        ref: `R:OPEN:${pad(index)}`,
+        ref: reviewItemSourceRef("open_question", index),
         type: "open_question",
         supportType: "open_question",
         reviewId: input.reviewId,
@@ -236,10 +250,13 @@ export function buildContextCandidates(input: BuildContextCandidatesInput) {
     );
   });
 
-  payload.nextQuestions.filter(isVisibleReviewItem).forEach((item, index) => {
+  payload.nextQuestions.forEach((item, index) => {
+    if (!isVisibleReviewItem(item)) {
+      return;
+    }
     candidates.push(
       reviewItemCandidate(item, {
-        ref: `R:NEXT:${pad(index)}`,
+        ref: reviewItemSourceRef("next_question", index),
         type: "next_question",
         supportType: "open_question",
         reviewId: input.reviewId,
@@ -268,7 +285,7 @@ export function buildContextCandidates(input: BuildContextCandidatesInput) {
           continue;
         }
         candidates.push({
-          ref: `D:${sessionRef}:${pad(decisionIndex)}`,
+          ref: `D:${sessionRef}:${formatReviewItemIndex(decisionIndex)}`,
           type: "decision",
           text: item.text,
           supportType: "confirmed",
@@ -296,7 +313,7 @@ export function buildContextCandidates(input: BuildContextCandidatesInput) {
         factIndex < MAX_PACK_USER_FACTS
       ) {
         candidates.push({
-          ref: `F:${sessionRef}:${pad(factIndex)}`,
+          ref: `F:${sessionRef}:${formatReviewItemIndex(factIndex)}`,
           type: "user_fact",
           text: item.text,
           supportType: "confirmed",

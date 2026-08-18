@@ -187,3 +187,33 @@ test("AI入力用テキストにRaw Messageラベルを付けない", () => {
   assert.doesNotMatch(labeled, /SESSION S01/);
   assert.doesNotMatch(labeled, /USER:/);
 });
+
+test("Review item の SourceRef は payload 元 index を使う", () => {
+  const candidates = buildContextCandidates({
+    reviewId: "review-1",
+    reviewPayload: {
+      ...reviewPayload(),
+      commonThemes: [
+        {
+          text: "除外されたテーマ",
+          evidence: [],
+          semanticValid: false,
+          invalidReason: "insufficient_distinct_sessions",
+        },
+        {
+          text: "人間側の整理が繰り返されている。",
+          evidence: [],
+          semanticValid: true,
+          supportType: "cross_session_interpretation",
+        },
+      ],
+    },
+    sessions: [],
+  });
+  assert.equal(
+    candidates.some((item) => item.ref === "R:THEME:01"),
+    false,
+  );
+  const theme = candidates.find((item) => item.ref === "R:THEME:02");
+  assert.equal(theme?.text, "人間側の整理が繰り返されている。");
+});

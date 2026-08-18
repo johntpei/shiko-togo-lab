@@ -12,6 +12,10 @@ import {
   supportTypeLabel,
   type ReviewDisplayKind,
 } from "@/lib/reviews/review-display";
+import {
+  hiddenReviewItems as hiddenItems,
+  visibleReviewItems as visibleItems,
+} from "@/lib/reviews/visible-items";
 
 const REVIEW_FAILURE_LABELS: Record<string, string> = {
   insufficient_distinct_sessions: "複数Sessionの根拠がありません",
@@ -37,14 +41,6 @@ function formatAnalyzedAt(iso: string) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
-}
-
-function visibleItems<T extends { semanticValid?: boolean }>(items: T[]) {
-  return items.filter((item) => item.semanticValid !== false);
-}
-
-function hiddenItems<T extends { semanticValid?: boolean }>(items: T[]) {
-  return items.filter((item) => item.semanticValid === false);
 }
 
 function SupportLabel({
