@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Package } from "lucide-react";
 import { ReviewDetailPanel } from "@/components/app/review-detail-panel";
 import { SessionCard } from "@/components/app/session-card";
 import { parseStoredReviewPayload } from "@/lib/ai/review-schemas";
@@ -38,6 +38,16 @@ export default async function ReviewDetailPage({
         <ArrowLeft className="size-4" aria-hidden="true" />
         一覧へ戻る
       </Link>
+
+      <div className="mt-4">
+        <Link
+          href={`/context-packs/new?reviewId=${review.id}`}
+          className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-600/20 hover:bg-blue-700"
+        >
+          <Package className="size-4" aria-hidden="true" />
+          Context Packを作る
+        </Link>
+      </div>
 
       {payload ? (
         <div className="mt-6">

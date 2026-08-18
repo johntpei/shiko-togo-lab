@@ -6,10 +6,12 @@ import {
   Upload,
 } from "lucide-react";
 import Link from "next/link";
+import { ContextPackCard } from "@/components/app/context-pack-card";
 import { ReviewCard } from "@/components/app/review-card";
 import { SessionCard } from "@/components/app/session-card";
 import {
   countReviews,
+  listContextPacksWithSessionCount,
   countSessionsInDateRange,
   listRecentSessions,
   listReviewsWithSessionCount,
@@ -25,6 +27,7 @@ export default function DashboardPage() {
   const recentSessions = listRecentSessions(5);
   const reviewCount = countReviews();
   const recentReviews = listReviewsWithSessionCount().slice(0, 3);
+  const recentPacks = listContextPacksWithSessionCount().slice(0, 3);
 
   return (
     <div className="mx-auto max-w-6xl px-5 py-10 sm:px-8 sm:py-14">
@@ -126,7 +129,34 @@ export default function DashboardPage() {
           </div>
           <div className="grid gap-3">
             {recentReviews.map((review) => (
-              <ReviewCard key={review.id} review={review} />
+              <div key={review.id} className="grid gap-2">
+                <ReviewCard review={review} />
+                <Link
+                  href={`/context-packs/new?reviewId=${review.id}`}
+                  className="text-sm font-bold text-blue-600 hover:underline"
+                >
+                  Context Packを作る
+                </Link>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {recentPacks.length > 0 ? (
+        <section className="mt-10">
+          <div className="mb-4 flex items-end justify-between gap-3">
+            <h2 className="text-lg font-black text-ink">最近の Context Pack</h2>
+            <Link
+              href="/context-packs"
+              className="text-sm font-bold text-blue-600 hover:underline"
+            >
+              すべて見る
+            </Link>
+          </div>
+          <div className="grid gap-3">
+            {recentPacks.map((pack) => (
+              <ContextPackCard key={pack.id} pack={pack} />
             ))}
           </div>
         </section>

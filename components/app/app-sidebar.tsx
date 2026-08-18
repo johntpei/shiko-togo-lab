@@ -4,6 +4,7 @@ import {
   BrainCircuit,
   House,
   MessagesSquare,
+  Package,
   ScanSearch,
   ScrollText,
   Upload,
@@ -17,6 +18,7 @@ const nav = [
   { href: "/sessions", label: "Session", icon: MessagesSquare },
   { href: "/imports/chatgpt", label: "ChatGPT読込", icon: Upload },
   { href: "/reviews", label: "レビュー", icon: ScanSearch },
+  { href: "/context-packs", label: "Context Pack", icon: Package },
 ] as const;
 
 function isActive(pathname: string, href: string) {

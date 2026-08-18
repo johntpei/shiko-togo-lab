@@ -31,10 +31,25 @@ export const MAX_OPEN_QUESTIONS = 5;
 
 export const MAX_REVIEW_EVIDENCE_REFS_PER_ITEM = 4;
 
+export const CONTEXT_PACK_MAX_SOURCE_CHARS = 20_000;
+export const CONTEXT_PACK_MAX_OUTPUT_CHARS = 8_000;
+export const CONTEXT_PACK_TIMEOUT_MS = 90_000;
+
+export const MAX_PACK_CONFIRMED = 5;
+export const MAX_PACK_INSIGHTS = 3;
+export const MAX_PACK_TENSIONS = 2;
+export const MAX_PACK_HYPOTHESES = 2;
+export const MAX_PACK_OPEN_QUESTIONS = 3;
+export const MAX_PACK_USER_FACTS = 3;
+
 export function isAnalyzeInputTooLong(labeledTranscript: string) {
   return labeledTranscript.length > ANALYZE_SESSION_MAX_INPUT_CHARS;
 }
 
 export function isIntegratedReviewInputTooLong(labeledTranscript: string) {
   return labeledTranscript.length > INTEGRATED_REVIEW_MAX_INPUT_CHARS;
+}
+
+export function isContextPackSourceTooLong(labeledSource: string) {
+  return labeledSource.length > CONTEXT_PACK_MAX_SOURCE_CHARS;
 }

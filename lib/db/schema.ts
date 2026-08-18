@@ -120,6 +120,7 @@ export const contextPacks = sqliteTable("context_packs", {
   id: text("id").primaryKey(),
   title: text("title").notNull(),
   theme: text("theme").notNull().default(""),
+  currentQuestion: text("current_question").notNull().default(""),
   sourceReviewId: text("source_review_id").references(() => reviews.id, {
     onDelete: "set null",
   }),
@@ -128,6 +129,7 @@ export const contextPacks = sqliteTable("context_packs", {
   model: text("model").notNull(),
   promptVersion: text("prompt_version").notNull(),
   createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at"),
 });
 
 export const contextPackSessions = sqliteTable(
@@ -151,3 +153,4 @@ export type SourceConversationRecord = typeof sourceConversations.$inferSelect;
 export type SessionAnalysisRecord = typeof sessionAnalyses.$inferSelect;
 export type ReviewRecord = typeof reviews.$inferSelect;
 export type EvidenceRecord = typeof evidences.$inferSelect;
+export type ContextPackRecord = typeof contextPacks.$inferSelect;

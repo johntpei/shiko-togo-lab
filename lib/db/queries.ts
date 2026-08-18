@@ -8,13 +8,17 @@ import {
 import { getDb } from "./client";
 import type { StoredAnalysisPayload } from "@/lib/ai/schemas";
 import type { StoredReviewPayload } from "@/lib/ai/review-schemas";
+import type { StoredContextPackPayload } from "@/lib/context-pack/schema";
 import {
+  contextPacks,
+  contextPackSessions,
   evidences,
   messages,
   reviewSessions,
   reviews,
   sessionAnalyses,
   sessions,
+  type ContextPackRecord,
   type MessageRecord,
   type ReviewRecord,
   type SessionAnalysisRecord,
@@ -373,5 +377,108 @@ export function listSessionsByReviewId(reviewId: string) {
 
 export function countReviews() {
   const row = getDb().select({ value: count() }).from(reviews).get();
+  return row?.value ?? 0;
+}
+
+export function insertContextPack(input: {
+  title: string;
+  currentQuestion: string;
+  sourceReviewId: string;
+  model: string;
+  promptVersion: string;
+  payload: StoredContextPackPayload;
+  markdown: string;
+  sessionIds: string[];
+}): ContextPackRecord {
+  const now = new Date().toISOString();
+  const record: ContextPackRecord = {
+    id: crypto.randomUUID(),
+    title: input.title,
+    theme: "",
+    currentQuestion: input.currentQuestion,
+    sourceReviewId: input.sourceReviewId,
+    markdown: input.markdown,
+    payload: JSON.stringify(input.payload),
+    model: input.model,
+    promptVersion: input.promptVersion,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  getDb().transaction((tx) => {
+    tx.insert(contextPacks).values(record).run();
+    if (input.sessionIds.length > 0) {
+      tx.insert(contextPackSessions)
+        .values(
+          input.sessionIds.map((sessionId) => ({
+            contextPackId: record.id,
+            sessionId,
+          })),
+        )
+        .run();
+    }
+  });
+
+  return record;
+}
+
+export function listContextPacks() {
+  return getDb()
+    .select()
+    .from(contextPacks)
+    .orderBy(desc(contextPacks.createdAt))
+    .all();
+}
+
+export type ContextPackListItem = ContextPackRecord & {
+  sessionCount: number;
+  sourceReviewTitle: string | null;
+};
+
+export function listContextPacksWithSessionCount(): ContextPackListItem[] {
+  const all = listContextPacks();
+  const counts = getDb()
+    .select({
+      contextPackId: contextPackSessions.contextPackId,
+      sessionCount: count(),
+    })
+    .from(contextPackSessions)
+    .groupBy(contextPackSessions.contextPackId)
+    .all();
+  const countById = new Map(
+    counts.map((row) => [row.contextPackId, Number(row.sessionCount)]),
+  );
+  const reviewTitles = new Map(
+    listReviews().map((review) => [review.id, review.title]),
+  );
+  return all.map((pack) => ({
+    ...pack,
+    sessionCount: countById.get(pack.id) ?? 0,
+    sourceReviewTitle: pack.sourceReviewId
+      ? (reviewTitles.get(pack.sourceReviewId) ?? null)
+      : null,
+  }));
+}
+
+export function getContextPackById(id: string) {
+  return (
+    getDb().select().from(contextPacks).where(eq(contextPacks.id, id)).get() ??
+    null
+  );
+}
+
+export function listSessionsByContextPackId(contextPackId: string) {
+  return getDb()
+    .select({ session: sessions })
+    .from(contextPackSessions)
+    .innerJoin(sessions, eq(sessions.id, contextPackSessions.sessionId))
+    .where(eq(contextPackSessions.contextPackId, contextPackId))
+    .orderBy(asc(sessions.occurredAt), asc(sessions.createdAt))
+    .all()
+    .map((row) => row.session);
+}
+
+export function countContextPacks() {
+  const row = getDb().select({ value: count() }).from(contextPacks).get();
   return row?.value ?? 0;
 }
