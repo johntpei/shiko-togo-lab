@@ -134,3 +134,27 @@ export function listObservationSessionIds(
 export function countObservations(db: AppDb = getDb()) {
   return db.select().from(observations).all().length;
 }
+
+export function listObservationSessionIdsByObservationIds(
+  observationIds: string[],
+  db: AppDb = getDb(),
+) {
+  const map = new Map<string, string[]>();
+  if (observationIds.length === 0) {
+    return map;
+  }
+  const rows = db
+    .select({
+      observationId: observationSessions.observationId,
+      sessionId: observationSessions.sessionId,
+    })
+    .from(observationSessions)
+    .where(inArray(observationSessions.observationId, observationIds))
+    .all();
+  for (const row of rows) {
+    const current = map.get(row.observationId) ?? [];
+    current.push(row.sessionId);
+    map.set(row.observationId, current);
+  }
+  return map;
+}
