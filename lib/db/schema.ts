@@ -191,6 +191,64 @@ export const observationSessions = sqliteTable(
   ],
 );
 
+export const concepts = sqliteTable(
+  "concepts",
+  {
+    id: text("id").primaryKey(),
+    canonicalLabel: text("canonical_label").notNull(),
+    normalizedKey: text("normalized_key").notNull(),
+    matchingVersion: text("matching_version").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("concepts_normalized_key_unique").on(table.normalizedKey),
+  ],
+);
+
+export const conceptAliases = sqliteTable(
+  "concept_aliases",
+  {
+    conceptId: text("concept_id")
+      .notNull()
+      .references(() => concepts.id, { onDelete: "cascade" }),
+    aliasLabel: text("alias_label").notNull(),
+    normalizedAlias: text("normalized_alias").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.conceptId, table.normalizedAlias] }),
+  ],
+);
+
+export const conceptOccurrences = sqliteTable(
+  "concept_occurrences",
+  {
+    id: text("id").primaryKey(),
+    conceptId: text("concept_id")
+      .notNull()
+      .references(() => concepts.id, { onDelete: "cascade" }),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    evidenceRef: text("evidence_ref").notNull(),
+    occurredAt: text("occurred_at").notNull(),
+    sourceRole: text("source_role").notNull(),
+    sourceType: text("source_type").notNull(),
+    extractionVersion: text("extraction_version").notNull(),
+  },
+  (table) => [
+    uniqueIndex("concept_occurrences_identity_unique").on(
+      table.extractionVersion,
+      table.sourceType,
+      table.messageId,
+      table.evidenceRef,
+      table.conceptId,
+    ),
+  ],
+);
+
 export type SessionRecord = typeof sessions.$inferSelect;
 export type MessageRecord = typeof messages.$inferSelect;
 export type SourceConversationRecord = typeof sourceConversations.$inferSelect;
@@ -199,3 +257,6 @@ export type ReviewRecord = typeof reviews.$inferSelect;
 export type EvidenceRecord = typeof evidences.$inferSelect;
 export type ContextPackRecord = typeof contextPacks.$inferSelect;
 export type ObservationRecord = typeof observations.$inferSelect;
+export type ConceptRecord = typeof concepts.$inferSelect;
+export type ConceptAliasRecord = typeof conceptAliases.$inferSelect;
+export type ConceptOccurrenceRecord = typeof conceptOccurrences.$inferSelect;
