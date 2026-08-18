@@ -447,12 +447,14 @@ export async function createIntegratedReview(
   sources: ReviewSessionSource[],
   title: string,
 ): Promise<IntegratedReviewResult> {
-  const { insertReview } = await import("@/lib/db/queries");
+  const { insertReviewAndProject } = await import(
+    "@/lib/observations/project-review"
+  );
   try {
     const provider = getAiProvider();
     return await runIntegratedReview(sources, title, {
       generateStructured: (request) => provider.generateStructured(request),
-      save: insertReview,
+      save: insertReviewAndProject,
     });
   } catch (error) {
     if (error instanceof AnalyzeSessionError) {

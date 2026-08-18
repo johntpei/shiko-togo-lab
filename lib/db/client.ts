@@ -30,7 +30,7 @@ function resolveMigrationsFolder() {
   return found;
 }
 
-function applySqlMigrations(sqlite: Database.Database) {
+export function applySqlMigrations(sqlite: Database.Database) {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       filename TEXT PRIMARY KEY NOT NULL

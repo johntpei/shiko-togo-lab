@@ -147,6 +147,50 @@ export const contextPackSessions = sqliteTable(
   ],
 );
 
+export const observations = sqliteTable(
+  "observations",
+  {
+    id: text("id").primaryKey(),
+    kind: text("kind").notNull(),
+    projectionVersion: text("projection_version").notNull(),
+    sourceReviewId: text("source_review_id")
+      .notNull()
+      .references(() => reviews.id, { onDelete: "cascade" }),
+    sourceRef: text("source_ref").notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    supportType: text("support_type"),
+    payload: text("payload").notNull(),
+    firstSeenAt: text("first_seen_at"),
+    lastSeenAt: text("last_seen_at"),
+    detectedAt: text("detected_at").notNull(),
+    distinctSessionCount: integer("distinct_session_count").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("observations_source_identity_unique").on(
+      table.sourceReviewId,
+      table.sourceRef,
+      table.projectionVersion,
+    ),
+  ],
+);
+
+export const observationSessions = sqliteTable(
+  "observation_sessions",
+  {
+    observationId: text("observation_id")
+      .notNull()
+      .references(() => observations.id, { onDelete: "cascade" }),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.observationId, table.sessionId] }),
+  ],
+);
+
 export type SessionRecord = typeof sessions.$inferSelect;
 export type MessageRecord = typeof messages.$inferSelect;
 export type SourceConversationRecord = typeof sourceConversations.$inferSelect;
@@ -154,3 +198,4 @@ export type SessionAnalysisRecord = typeof sessionAnalyses.$inferSelect;
 export type ReviewRecord = typeof reviews.$inferSelect;
 export type EvidenceRecord = typeof evidences.$inferSelect;
 export type ContextPackRecord = typeof contextPacks.$inferSelect;
+export type ObservationRecord = typeof observations.$inferSelect;
