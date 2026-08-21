@@ -1,4 +1,5 @@
 import {
+  isAnalyzableEvidenceRole,
   splitMessageIntoEvidenceUnits,
   toEvidenceRef,
   toEvidenceRole,
@@ -30,15 +31,23 @@ export type ConceptExtractUnit = {
   sessionOccurredAt: string;
 };
 
+/**
+ * 抽出対象は USER だけ。
+ * EvidenceRef の Message 番号は Session 全体（user / assistant）の ordinal。
+ * Assistant Message は番号を消費するが Unit にはしない。
+ */
 export function prepareUserEvidenceUnits(
   session: ConceptExtractSession,
 ): ConceptExtractUnit[] {
-  const userMessages = session.messages.filter(
-    (message) => toEvidenceRole(message.role) === "user",
+  const analyzable = session.messages.filter((message) =>
+    isAnalyzableEvidenceRole(message.role),
   );
   const units: ConceptExtractUnit[] = [];
 
-  for (const [messageIndex, message] of userMessages.entries()) {
+  for (const [messageIndex, message] of analyzable.entries()) {
+    if (toEvidenceRole(message.role) !== "user") {
+      continue;
+    }
     const slices = splitMessageIntoEvidenceUnits(message.content);
     for (const [unitIndex, slice] of slices.entries()) {
       const sourceCreatedAt = message.sourceCreatedAt?.trim() || null;
@@ -60,4 +69,15 @@ export function conceptExtractUnitsByRef(
   units: ConceptExtractUnit[],
 ): Map<string, ConceptExtractUnit> {
   return new Map(units.map((unit) => [unit.evidenceRef, unit]));
+}
+
+export function formatUserEvidenceUnitsForLlm(
+  units: ConceptExtractUnit[],
+): string {
+  if (units.length === 0) {
+    return "（USER Evidence Unit はありません）";
+  }
+  return units
+    .map((unit) => `[${unit.evidenceRef}][USER] ${unit.text}`)
+    .join("\n\n");
 }

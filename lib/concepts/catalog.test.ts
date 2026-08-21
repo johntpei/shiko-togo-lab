@@ -4,6 +4,7 @@ import {
   addConceptToCatalog,
   createCatalogEntry,
   emptyConceptCatalog,
+  formatConceptCatalogForLlm,
   lookupCatalogByAlias,
   lookupCatalogByNormalizedKey,
 } from "./catalog";
@@ -43,4 +44,21 @@ test("virtual catalog へ NEW 相当を追加できる", () => {
   assert.equal(next.entries[0]?.ref, "C01");
   assert.equal(next.entries[0]?.normalizedKey, "ai性能");
   assert.deepEqual(next.entries[0]?.aliases, ["高性能AI"]);
+});
+
+test("LLM catalog は ConceptRef と canonical と aliases だけを渡す", () => {
+  const catalog = {
+    entries: [
+      createCatalogEntry({
+        ref: "C01",
+        conceptId: "virtual:ai性能",
+        canonicalLabel: "AI性能",
+        aliases: ["高性能AI"],
+      }),
+    ],
+  };
+  const labeled = formatConceptCatalogForLlm(catalog);
+  assert.equal(labeled, "C01 | AI性能 | aliases: 高性能AI");
+  assert.doesNotMatch(labeled, /virtual:/);
+  assert.equal(formatConceptCatalogForLlm(emptyConceptCatalog()), "（まだ Concept はありません）");
 });

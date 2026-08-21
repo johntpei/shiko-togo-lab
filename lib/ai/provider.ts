@@ -12,9 +12,16 @@ export type StructuredGenerateRequest = {
   timeoutMs?: number;
 };
 
+export type StructuredGenerateUsage = {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+};
+
 export type StructuredGenerateResult = {
   parsed: unknown;
   model: string;
+  usage?: StructuredGenerateUsage;
 };
 
 export type AiProvider = {

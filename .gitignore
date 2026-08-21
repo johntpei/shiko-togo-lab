@@ -39,6 +39,9 @@ yarn-error.log*
 /data/*.db-wal
 /data/*.db-shm
 
+# Concept census dry-run reports
+/data/concept-pilot*.json
+
 # ChatGPT Export / personal transcripts
 conversations-*.json
 **/conversations-*.json

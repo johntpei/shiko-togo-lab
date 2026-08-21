@@ -163,3 +163,26 @@ export function addAliasesToCatalog(
   ]);
   return next;
 }
+
+export function lookupCatalogByConceptId(
+  catalog: ConceptRegistrySnapshot,
+  conceptId: string,
+) {
+  return catalog.entries.find((entry) => entry.conceptId === conceptId);
+}
+
+export function formatConceptCatalogForLlm(
+  catalog: ConceptRegistrySnapshot,
+): string {
+  if (catalog.entries.length === 0) {
+    return "（まだ Concept はありません）";
+  }
+  return catalog.entries
+    .map((entry) => {
+      if (entry.aliases.length === 0) {
+        return `${entry.ref} | ${entry.canonicalLabel}`;
+      }
+      return `${entry.ref} | ${entry.canonicalLabel} | aliases: ${entry.aliases.join(", ")}`;
+    })
+    .join("\n");
+}

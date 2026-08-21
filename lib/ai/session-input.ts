@@ -1,5 +1,6 @@
 import type { MessageRecord } from "@/lib/db/schema";
 import {
+  isAnalyzableEvidenceRole,
   splitMessageIntoEvidenceUnits,
   toEvidenceRef,
   toEvidenceRole,
@@ -8,8 +9,6 @@ import {
 } from "./evidence-units";
 
 export { toMessageRef };
-
-const ANALYZABLE_ROLES = new Set(["user", "assistant"]);
 
 export type AnalyzeMessage = Pick<
   MessageRecord,
@@ -45,7 +44,7 @@ function hasAttachments(json: string | null) {
 
 export function buildAnalyzeInput(messages: AnalyzeMessage[]): AnalyzeInput {
   const analyzable = messages.filter((message) =>
-    ANALYZABLE_ROLES.has(message.role),
+    isAnalyzableEvidenceRole(message.role),
   );
   const refToMessageId = new Map<string, string>();
   const contentByMessageId = new Map<string, string>();
@@ -74,7 +73,7 @@ export function buildEvidenceAnalyzeInput(
   sessionIndex?: number,
 ): EvidenceAnalyzeInput {
   const analyzable = messages.filter((message) =>
-    ANALYZABLE_ROLES.has(message.role),
+    isAnalyzableEvidenceRole(message.role),
   );
   const contentByMessageId = new Map<string, string>();
   const units: EvidenceUnit[] = [];

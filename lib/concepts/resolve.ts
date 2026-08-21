@@ -4,6 +4,7 @@ import {
   addConceptToCatalog,
   cloneConceptCatalog,
   collectAliasCandidates,
+  lookupCatalogByConceptId,
   lookupCatalogByNormalizedKey,
   lookupCatalogByRef,
   uniqueAliasLabels,
@@ -99,6 +100,19 @@ export type ConceptRejectedOperation = {
   detail?: string;
 };
 
+export type ConceptActionOutcome = {
+  originalAction: ConceptExtractAction["action"];
+  evidenceRef: string;
+  surfaceForm: string;
+  status: "skip" | "uncertain" | "rejected" | "accepted";
+  resolvedAs?: "match" | "new";
+  conceptRef?: string;
+  canonicalLabel?: string;
+  aliases?: string[];
+  rejectReason?: ConceptResolveRejectReason;
+  detail?: string;
+};
+
 export type ConceptResolveResult = {
   nextCatalog: ConceptRegistrySnapshot;
   operations: ConceptValidatedOperation[];
@@ -108,6 +122,7 @@ export type ConceptResolveResult = {
   skipped: ConceptSkippedOperation[];
   uncertain: ConceptUncertainOperation[];
   rejected: ConceptRejectedOperation[];
+  outcomes: ConceptActionOutcome[];
 };
 
 export type ConceptResolveInput = {
@@ -189,8 +204,21 @@ export function resolveConceptActions(
   const skipped: ConceptSkippedOperation[] = [];
   const uncertain: ConceptUncertainOperation[] = [];
   const rejected: ConceptRejectedOperation[] = [];
+  const outcomes: ConceptActionOutcome[] = [];
   const acceptedByUnit = new Map<string, Set<string>>();
   const createdInBatch = new Set<string>();
+
+  const recordRejected = (op: ConceptRejectedOperation) => {
+    rejected.push(op);
+    outcomes.push({
+      originalAction: op.action ?? "new",
+      evidenceRef: op.evidenceRef ?? "",
+      surfaceForm: op.surfaceForm ?? "",
+      status: "rejected",
+      rejectReason: op.reason,
+      detail: op.detail,
+    });
+  };
 
   const acceptOccurrence = (
     identity: ResolvedIdentity,
@@ -199,7 +227,7 @@ export function resolveConceptActions(
   ) => {
     const accepted = acceptedByUnit.get(unit.evidenceRef) ?? new Set<string>();
     if (accepted.has(identity.conceptId)) {
-      rejected.push(
+      recordRejected(
         reject({
           reason: "duplicate_concept_in_unit",
           evidenceRef: unit.evidenceRef,
@@ -210,7 +238,7 @@ export function resolveConceptActions(
       return;
     }
     if (accepted.size >= MAX_CONCEPTS_PER_UNIT) {
-      rejected.push(
+      recordRejected(
         reject({
           reason: "max_concepts_per_unit",
           evidenceRef: unit.evidenceRef,
@@ -227,7 +255,7 @@ export function resolveConceptActions(
     };
     const occurrenceCheck = validateConceptOccurrence(occurrenceInput);
     if (!occurrenceCheck.ok) {
-      rejected.push(
+      recordRejected(
         reject({
           reason: "invalid_occurrence",
           evidenceRef: unit.evidenceRef,
@@ -288,6 +316,16 @@ export function resolveConceptActions(
     operations.push(occurrence);
     aliasCandidates.push(...newAliases);
     operations.push(...newAliases);
+    outcomes.push({
+      originalAction: action.action,
+      evidenceRef: unit.evidenceRef,
+      surfaceForm: action.surfaceForm,
+      status: "accepted",
+      resolvedAs: identity.resolvedAs,
+      conceptRef: lookupCatalogByConceptId(catalog, identity.conceptId)?.ref,
+      canonicalLabel: identity.canonicalLabel,
+      aliases: identity.aliases,
+    });
   };
 
   const resolveNewIdentity = (
@@ -361,7 +399,7 @@ export function resolveConceptActions(
     if (action.action === "skip" || action.action === "uncertain") {
       const lookup = lookupExtractUnit(action.evidenceRef, unitsByRef);
       if (!lookup.ok) {
-        rejected.push(
+        recordRejected(
           reject({
             reason: lookup.reason,
             evidenceRef: action.evidenceRef,
@@ -377,11 +415,23 @@ export function resolveConceptActions(
           evidenceRef: lookup.unit.evidenceRef,
           surfaceForm: action.surfaceForm,
         });
+        outcomes.push({
+          originalAction: "skip",
+          evidenceRef: lookup.unit.evidenceRef,
+          surfaceForm: action.surfaceForm,
+          status: "skip",
+        });
       } else {
         uncertain.push({
           type: "uncertain",
           evidenceRef: lookup.unit.evidenceRef,
           surfaceForm: action.surfaceForm,
+        });
+        outcomes.push({
+          originalAction: "uncertain",
+          evidenceRef: lookup.unit.evidenceRef,
+          surfaceForm: action.surfaceForm,
+          status: "uncertain",
         });
       }
       continue;
@@ -393,7 +443,7 @@ export function resolveConceptActions(
       unitsByRef,
     });
     if (!grounded.ok) {
-      rejected.push(
+      recordRejected(
         reject({
           reason: grounded.reason,
           evidenceRef: action.evidenceRef,
@@ -409,7 +459,7 @@ export function resolveConceptActions(
         ? resolveMatchIdentity(action)
         : resolveNewIdentity(action);
     if (isRejectedOperation(identity)) {
-      rejected.push(identity);
+      recordRejected(identity);
       continue;
     }
 
@@ -425,6 +475,7 @@ export function resolveConceptActions(
     skipped,
     uncertain,
     rejected,
+    outcomes,
   };
 }
 

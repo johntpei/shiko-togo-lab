@@ -42,6 +42,11 @@ export function createOpenAiProvider(): AiProvider {
         return {
           parsed: response.output_parsed,
           model: response.model || request.model,
+          usage: {
+            inputTokens: response.usage?.input_tokens ?? null,
+            outputTokens: response.usage?.output_tokens ?? null,
+            totalTokens: response.usage?.total_tokens ?? null,
+          },
         };
       } catch (error) {
         if (error instanceof AnalyzeSessionError) {

@@ -30,6 +30,12 @@ export function toEvidenceRole(role: string): EvidenceRole {
   return "unknown";
 }
 
+/** Session 全体の EvidenceRef ordinal。user / assistant のみ番号を持つ。 */
+export function isAnalyzableEvidenceRole(role: string) {
+  const normalized = toEvidenceRole(role);
+  return normalized === "user" || normalized === "assistant";
+}
+
 export function toMessageRef(index: number) {
   return `M${String(index + 1).padStart(3, "0")}`;
 }
