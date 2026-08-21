@@ -4,6 +4,7 @@ import {
   CONCEPT_EXTRACT_PROMPT_VERSION,
   CONCEPT_EXTRACT_SYSTEM_PROMPT,
   CONCEPT_EXTRACT_SYSTEM_PROMPT_V4,
+  CONCEPT_EXTRACT_SYSTEM_PROMPT_V5,
   buildConceptExtractRepairUserPrompt,
   buildConceptExtractUserPrompt,
 } from "./concept-extract";
@@ -15,20 +16,31 @@ const LONG_USER =
 const LONG_ASSISTANT =
   "了解しました。高性能AIと距離感の両方について整理して返しますね。愛着不安かもしれません。";
 
-test("現行 promptVersion は concept-extract-prompt-v5", () => {
-  assert.equal(CONCEPT_EXTRACT_PROMPT_VERSION, "concept-extract-prompt-v5");
+test("現行 promptVersion は concept-extract-prompt-v4", () => {
+  assert.equal(CONCEPT_EXTRACT_PROMPT_VERSION, "concept-extract-prompt-v4");
+  assert.equal(
+    CONCEPT_EXTRACT_SYSTEM_PROMPT,
+    CONCEPT_EXTRACT_SYSTEM_PROMPT_V4,
+  );
 });
 
-test("Prompt v4 定義は残し、現行は v5 を使う", () => {
-  assert.match(CONCEPT_EXTRACT_SYSTEM_PROMPT_V4, /shortest identity-preserving span/);
+test("Prompt v5 定義は残し、現行は v4 を使う", () => {
+  assert.match(CONCEPT_EXTRACT_SYSTEM_PROMPT_V5, /Session-level Concept selection/);
   assert.equal(
-    CONCEPT_EXTRACT_SYSTEM_PROMPT === CONCEPT_EXTRACT_SYSTEM_PROMPT_V4,
+    CONCEPT_EXTRACT_SYSTEM_PROMPT === CONCEPT_EXTRACT_SYSTEM_PROMPT_V5,
     false,
   );
 });
 
-test("Prompt v5 は Session-level selection と soft unique budget を明示する", () => {
+test("Prompt v4 は identity-preserving span と exact recurrence を明示する", () => {
   const prompt = CONCEPT_EXTRACT_SYSTEM_PROMPT;
+  assert.match(prompt, /shortest identity-preserving span/);
+  assert.match(prompt, /Catalog「人間関係」かつ Unit が「人間関係について〜」/);
+  assert.match(prompt, /「高性能」exact MATCH をしない/);
+});
+
+test("Prompt v5 は Session-level selection と soft unique budget を明示する", () => {
+  const prompt = CONCEPT_EXTRACT_SYSTEM_PROMPT_V5;
   assert.match(prompt, /Session-level Concept selection/);
   assert.match(prompt, /網羅抽出ではない/);
   assert.match(prompt, /少数の安定 Node/);
@@ -39,7 +51,7 @@ test("Prompt v5 は Session-level selection と soft unique budget を明示す�
 });
 
 test("Prompt v5 は Map \+ Timeline Test と Centrality を明示する", () => {
-  const prompt = CONCEPT_EXTRACT_SYSTEM_PROMPT;
+  const prompt = CONCEPT_EXTRACT_SYSTEM_PROMPT_V5;
   assert.match(prompt, /Map \+ Timeline Test/);
   assert.match(prompt, /Thought Map の node として単独表示/);
   assert.match(prompt, /このテーマにまた戻ってきた/);
@@ -48,7 +60,7 @@ test("Prompt v5 は Map \+ Timeline Test と Centrality を明示する", () => 
 });
 
 test("Prompt v5 は generic SKIP と specific stable 保持を明示する", () => {
-  const prompt = CONCEPT_EXTRACT_SYSTEM_PROMPT;
+  const prompt = CONCEPT_EXTRACT_SYSTEM_PROMPT_V5;
   assert.match(prompt, /気持ち \/ 高性能 \/ テーマ \/ ツール \/ データ \/ 設計/);
   assert.match(prompt, /辛い \/ 怖い \/ どうでもいい \/ 論理的 \/ 臨機応変/);
   assert.match(prompt, /感じ \/ 状態 \/ 方法/);
@@ -62,7 +74,7 @@ test("Prompt v5 は generic SKIP と specific stable 保持を明示する", () 
 });
 
 test("Prompt v5 は clause / episodic SKIP と exact recurrence を明示する", () => {
-  const prompt = CONCEPT_EXTRACT_SYSTEM_PROMPT;
+  const prompt = CONCEPT_EXTRACT_SYSTEM_PROMPT_V5;
   assert.match(prompt, /一生を1人で過ごすこと/);
   assert.match(prompt, /女性をともに過ごしたい欲求/);
   assert.match(prompt, /連鎖から抜け出す方法/);
@@ -75,7 +87,7 @@ test("Prompt v5 は clause / episodic SKIP と exact recurrence を明示する"
 });
 
 test("Prompt v5 は Related != Identity の negative を持つ", () => {
-  const prompt = CONCEPT_EXTRACT_SYSTEM_PROMPT;
+  const prompt = CONCEPT_EXTRACT_SYSTEM_PROMPT_V5;
   assert.match(prompt, /寂しさ ≠ 女性の気持ち/);
   assert.match(prompt, /気持ち ≠ 自分の気持ち/);
   assert.match(prompt, /気持ち ≠ 相手の気持ち/);
@@ -103,8 +115,7 @@ test("User prompt は Catalog exact surface と substring 禁止を指示する"
   for (const unit of units) {
     assert.match(userPrompt, new RegExp(`- ${unit.evidenceRef}`));
   }
-  assert.match(userPrompt, /Session 全体の主要な思考対象を把握する/);
-  assert.match(userPrompt, /通常 3〜8 unique Concept/);
+  assert.doesNotMatch(userPrompt, /通常 3〜8 unique Concept/);
   assert.match(userPrompt, /置き換え可能な同一 Concept 名なら MATCH/);
   assert.match(userPrompt, /Catalog canonicalLabel と同一の文字列/);
   assert.match(userPrompt, /Catalog「気持ち」に対し「自分の気持ち」から「気持ち」だけ MATCH しない/);

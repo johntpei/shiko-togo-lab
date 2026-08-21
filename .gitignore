@@ -41,6 +41,9 @@ yarn-error.log*
 
 # Concept census dry-run reports
 /data/concept-pilot*.json
+/data/concept-admission-pilot*.json
+/data/concept-admission-assessment*.json
+/data/concept-admission-calibration*.json
 
 # ChatGPT Export / personal transcripts
 conversations-*.json

@@ -119,7 +119,7 @@ test("1 Session は 1 API call で、NEW canonical は grounded surface", async 
     assert.equal(result.apiCalls, 1);
     assert.equal(result.retryCalls, 0);
     assert.equal(result.repaired, false);
-    assert.equal(result.promptVersion, "concept-extract-prompt-v5");
+    assert.equal(result.promptVersion, "concept-extract-prompt-v4");
     assert.equal(result.actions[0]?.action, "new");
     assert.equal(result.resolve.newConcepts[0]?.canonicalLabel, "高性能AI");
     assert.ok(result.resolve.skipped.length >= 1);

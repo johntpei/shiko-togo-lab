@@ -12,7 +12,7 @@ export const CONCEPT_EXTRACT_PROMPT_V2 = "concept-extract-prompt-v2";
 export const CONCEPT_EXTRACT_PROMPT_V3 = "concept-extract-prompt-v3";
 export const CONCEPT_EXTRACT_PROMPT_V4 = "concept-extract-prompt-v4";
 export const CONCEPT_EXTRACT_PROMPT_V5 = "concept-extract-prompt-v5";
-export const CONCEPT_EXTRACT_PROMPT_VERSION = CONCEPT_EXTRACT_PROMPT_V5;
+export const CONCEPT_EXTRACT_PROMPT_VERSION = CONCEPT_EXTRACT_PROMPT_V4;
 
 export const CONCEPT_EXTRACT_SYSTEM_PROMPT_V1 = `あなたは、1つの対話Sessionの USER Evidence Unit だけを根拠に Concept を抽出するアシスタントです。
 与えられた USER Evidence Units と Concept Catalog 以外の情報は使いません。
@@ -542,7 +542,7 @@ semantic に見えても Identity は統合しない（Server が隔離する）
 ChatGPT / Claude は単なるチャネル利用なら skip。比較・判断の対象なら候補になり得る。
 `;
 
-export const CONCEPT_EXTRACT_SYSTEM_PROMPT = CONCEPT_EXTRACT_SYSTEM_PROMPT_V5;
+export const CONCEPT_EXTRACT_SYSTEM_PROMPT = CONCEPT_EXTRACT_SYSTEM_PROMPT_V4;
 
 export function buildConceptExtractUserPrompt(input: {
   catalog: ConceptRegistrySnapshot;
@@ -553,7 +553,6 @@ export function buildConceptExtractUserPrompt(input: {
     .join("\n");
   return [
     "# Concept Catalog",
-    "各 Unit の前に Session 全体の主要な思考対象を把握する。網羅抽出しない。通常 3〜8 unique Concept。",
     "NEW の前に、Catalog canonicalLabel と同一の文字列が Unit 内に独立した思考対象として明示されていないか確認する。",
     "独立した exact surface なら MATCH を優先する。larger phrase の一部分だけを切り出して MATCH しない。",
     "Catalog「気持ち」に対し「自分の気持ち」から「気持ち」だけ MATCH しない。",

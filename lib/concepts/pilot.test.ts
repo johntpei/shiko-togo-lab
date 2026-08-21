@@ -176,7 +176,7 @@ test("Session A の NEW が Session B の catalog に存在する", async () => 
     assert.equal(result.report.totals.new, 1);
     assert.equal(result.report.totals.match, 1);
     assert.equal(result.report.metadata.selectedSessionIds[0], "session-b");
-    assert.equal(result.report.metadata.promptVersion, "concept-extract-prompt-v5");
+    assert.equal(result.report.metadata.promptVersion, "concept-extract-prompt-v4");
     assert.equal(result.report.metadata.extractionVersion, "concept-extraction-v1");
   });
 });
