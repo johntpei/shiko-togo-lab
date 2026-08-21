@@ -18,6 +18,26 @@ export type StructuredGenerateUsage = {
   totalTokens: number | null;
 };
 
+export function addStructuredUsage(
+  current: StructuredGenerateUsage | null,
+  next: StructuredGenerateUsage | null,
+): StructuredGenerateUsage | null {
+  if (!current && !next) {
+    return null;
+  }
+  const sum = (a: number | null | undefined, b: number | null | undefined) => {
+    if (a == null && b == null) {
+      return null;
+    }
+    return (a ?? 0) + (b ?? 0);
+  };
+  return {
+    inputTokens: sum(current?.inputTokens, next?.inputTokens),
+    outputTokens: sum(current?.outputTokens, next?.outputTokens),
+    totalTokens: sum(current?.totalTokens, next?.totalTokens),
+  };
+}
+
 export type StructuredGenerateResult = {
   parsed: unknown;
   model: string;

@@ -8,6 +8,7 @@ export const CONCEPT_EXTRACT_ACTIONS = [
 export type ConceptExtractActionKind = (typeof CONCEPT_EXTRACT_ACTIONS)[number];
 
 export const MAX_PROPOSED_ALIASES = 2;
+export const MAX_CONCEPTS_PER_UNIT = 3;
 
 type ConceptExtractActionBase = {
   evidenceRef: string;
@@ -21,8 +22,6 @@ export type ConceptMatchAction = ConceptExtractActionBase & {
 
 export type ConceptNewAction = ConceptExtractActionBase & {
   action: "new";
-  proposedCanonicalLabel: string;
-  aliases?: string[];
 };
 
 export type ConceptSkipAction = ConceptExtractActionBase & {
@@ -34,7 +33,8 @@ export type ConceptUncertainAction = ConceptExtractActionBase & {
 };
 
 /**
- * 将来 LLM Structured Output から受け取る action。
+ * LLM Structured Output から受け取る action。
+ * canonicalLabel / aliases は LLM に生成させない。
  * role / messageId / sessionId / occurredAt は含めない。
  */
 export type ConceptExtractAction =

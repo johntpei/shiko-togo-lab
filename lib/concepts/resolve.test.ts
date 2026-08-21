@@ -5,7 +5,6 @@ import {
   addConceptToCatalog,
   createCatalogEntry,
   emptyConceptCatalog,
-  lookupCatalogByAlias,
 } from "./catalog";
 import { isHonorificPersonLabel } from "./honorific";
 import { summarizeConceptResolve } from "./metrics";
@@ -61,27 +60,42 @@ function seededCatalog() {
   };
 }
 
-test("NEW でも normalizedKey 完全一致なら既存 Concept へ MATCH し canonical は変えない", () => {
+test("NEW canonical は grounded surface であり LLM 自由生成しない", () => {
   const result = resolve({
-    catalog: seededCatalog(),
     actions: [
       {
         action: "new",
         evidenceRef: "M001:E01",
         surfaceForm: "高性能AI",
-        proposedCanonicalLabel: "AI 性能",
+      },
+    ],
+  });
+  assert.equal(result.newConcepts[0]?.canonicalLabel, "高性能AI");
+  assert.deepEqual(result.newConcepts[0]?.aliases, []);
+  assert.equal(result.outcomes[0]?.surfaceForm, "高性能AI");
+});
+
+test("exact match は Server が確定し canonical は変えない", () => {
+  const result = resolve({
+    catalog: seededCatalog(),
+    actions: [
+      {
+        action: "match",
+        evidenceRef: "M001:E01",
+        surfaceForm: "距離感",
+        existingConceptRef: "C02",
       },
     ],
   });
   assert.equal(result.newConcepts.length, 0);
   assert.equal(result.occurrences.length, 1);
   assert.equal(result.occurrences[0]?.resolvedAs, "match");
-  assert.equal(result.occurrences[0]?.conceptId, "concept-ai-perf");
-  assert.equal(result.occurrences[0]?.canonicalLabel, "AI性能");
-  assert.equal(result.nextCatalog.entries[0]?.canonicalLabel, "AI性能");
+  assert.equal(result.occurrences[0]?.matchKind, "exact");
+  assert.equal(result.occurrences[0]?.conceptId, "concept-distance");
+  assert.equal(result.occurrences[0]?.canonicalLabel, "距離感");
 });
 
-test("alias 一致だけでは自動 MATCH しない", () => {
+test("unique observed alias は Server 確定 MATCH になる", () => {
   const result = resolve({
     catalog: seededCatalog(),
     actions: [
@@ -89,48 +103,101 @@ test("alias 一致だけでは自動 MATCH しない", () => {
         action: "new",
         evidenceRef: "M001:E01",
         surfaceForm: "高性能AI",
-        proposedCanonicalLabel: "高性能AI",
       },
     ],
   });
-  assert.equal(result.newConcepts.length, 1);
+  assert.equal(result.newConcepts.length, 0);
+  assert.equal(result.occurrences[0]?.resolvedAs, "match");
+  assert.equal(result.occurrences[0]?.matchKind, "observed_alias");
+  assert.equal(result.occurrences[0]?.conceptId, "concept-ai-perf");
+  assert.equal(result.occurrences[0]?.canonicalLabel, "AI性能");
+});
+
+test("ambiguous alias は確定せず NEW に倒す", () => {
+  const catalog = {
+    entries: [
+      createCatalogEntry({
+        ref: "C01",
+        conceptId: "concept-ai-perf",
+        canonicalLabel: "AI性能",
+        aliases: ["高性能AI"],
+      }),
+      createCatalogEntry({
+        ref: "C02",
+        conceptId: "concept-speed",
+        canonicalLabel: "推論速度",
+        aliases: ["高性能AI"],
+      }),
+    ],
+  };
+  const result = resolve({
+    catalog,
+    actions: [
+      {
+        action: "match",
+        evidenceRef: "M001:E01",
+        surfaceForm: "高性能AI",
+        existingConceptRef: "C01",
+      },
+    ],
+  });
+  assert.equal(result.occurrences.some((item) => item.resolvedAs === "match"), false);
+  assert.equal(result.provisionalMatches.length, 1);
+  assert.equal(result.provisionalMatches[0]?.candidateConceptRef, "C01");
   assert.equal(result.newConcepts[0]?.canonicalLabel, "高性能AI");
-  assert.notEqual(result.newConcepts[0]?.conceptId, "concept-ai-perf");
+});
+
+test("semantic MATCH は provisional になり Identity 統合しない", () => {
+  const catalog = {
+    entries: [
+      createCatalogEntry({
+        ref: "C01",
+        conceptId: "concept-feelings",
+        canonicalLabel: "人の気持ちを考えられない",
+      }),
+    ],
+  };
+  const result = resolve({
+    catalog,
+    units: [
+      unit({
+        text: "ADHDの記憶力について同じ文で触れていますよ今",
+      }),
+    ],
+    actions: [
+      {
+        action: "match",
+        evidenceRef: "M001:E01",
+        surfaceForm: "ADHDの記憶力",
+        existingConceptRef: "C01",
+      },
+    ],
+  });
+  assert.equal(result.provisionalMatches.length, 1);
+  assert.equal(result.provisionalMatches[0]?.surfaceForm, "ADHDの記憶力");
+  assert.equal(result.provisionalMatches[0]?.candidateConceptRef, "C01");
   assert.equal(
-    lookupCatalogByAlias(seededCatalog(), "高性能AI").map((entry) => entry.ref)
-      .join(),
-    "C01",
+    result.provisionalMatches[0]?.existingCanonicalLabel,
+    "人の気持ちを考えられない",
   );
+  assert.equal(result.occurrences[0]?.resolvedAs, "new");
+  assert.equal(result.occurrences[0]?.canonicalLabel, "ADHDの記憶力");
+  assert.notEqual(result.occurrences[0]?.conceptId, "concept-feelings");
+  assert.equal(result.nextCatalog.entries.length, 2);
 });
 
-test("NEW で surfaceForm が canonical と違う場合は surface を alias candidate にする", () => {
+test("LLM aliases は採用しない", () => {
   const result = resolve({
     actions: [
       {
         action: "new",
         evidenceRef: "M001:E01",
         surfaceForm: "高性能AI",
-        proposedCanonicalLabel: "AI性能",
       },
     ],
   });
-  assert.deepEqual(result.newConcepts[0]?.aliases, ["高性能AI"]);
-  assert.equal(result.aliasCandidates[0]?.aliasLabel, "高性能AI");
-});
-
-test("alias 重複は normalize して除去する", () => {
-  const result = resolve({
-    actions: [
-      {
-        action: "new",
-        evidenceRef: "M001:E01",
-        surfaceForm: "高性能AI",
-        proposedCanonicalLabel: "AI性能",
-        aliases: ["高性能AI", "高性能 AI", "AI性能"],
-      },
-    ],
-  });
-  assert.deepEqual(result.newConcepts[0]?.aliases, ["高性能AI"]);
+  assert.deepEqual(result.newConcepts[0]?.aliases, []);
+  assert.equal(result.aliasCandidates.length, 0);
 });
 
 test("同じ NEW canonical を 2 Unit が返しても Concept candidate は 1 件、Occurrence は 2 件", () => {
@@ -143,7 +210,7 @@ test("同じ NEW canonical を 2 Unit が返しても Concept candidate は 1 �
     unit({
       evidenceRef: "M002:E01",
       messageId: "msg-2",
-      text: "AIの性能についても同じセッションで触れていますよ",
+      text: "高性能AIについても同じセッションで触れていますよ",
     }),
   ];
   const result = resolve({
@@ -153,13 +220,11 @@ test("同じ NEW canonical を 2 Unit が返しても Concept candidate は 1 �
         action: "new",
         evidenceRef: "M001:E01",
         surfaceForm: "高性能AI",
-        proposedCanonicalLabel: "AI性能",
       },
       {
         action: "new",
         evidenceRef: "M002:E01",
-        surfaceForm: "AIの性能",
-        proposedCanonicalLabel: "AI性能",
+        surfaceForm: "高性能AI",
       },
     ],
   });
@@ -168,11 +233,7 @@ test("同じ NEW canonical を 2 Unit が返しても Concept candidate は 1 �
   assert.equal(result.occurrences[0]?.conceptId, result.occurrences[1]?.conceptId);
   assert.equal(result.occurrences[0]?.resolvedAs, "new");
   assert.equal(result.occurrences[1]?.resolvedAs, "new");
-  assert.equal(
-    result.newConcepts[0]?.aliases.includes("高性能AI") &&
-      result.newConcepts[0]?.aliases.includes("AIの性能"),
-    true,
-  );
+  assert.deepEqual(result.newConcepts[0]?.aliases, []);
   const metrics = summarizeConceptResolve(units.length, result);
   assert.equal(metrics.new, 1);
   assert.equal(metrics.occurrences, 2);
@@ -186,25 +247,21 @@ test("1 Unit から 4 件の有効 Concept が出れば 4 件目は max_concepts
         action: "new",
         evidenceRef: "M001:E01",
         surfaceForm: "距離感",
-        proposedCanonicalLabel: "距離感",
       },
       {
         action: "new",
         evidenceRef: "M001:E01",
         surfaceForm: "自動化",
-        proposedCanonicalLabel: "自動化",
       },
       {
         action: "new",
         evidenceRef: "M001:E01",
         surfaceForm: "ChatGPT",
-        proposedCanonicalLabel: "ChatGPT",
       },
       {
         action: "new",
         evidenceRef: "M001:E01",
         surfaceForm: "Claude",
-        proposedCanonicalLabel: "Claude",
       },
     ],
   });
@@ -225,31 +282,26 @@ test("同一 Unit の重複 Concept は整理したあと max3 を適用する",
         action: "new",
         evidenceRef: "M001:E01",
         surfaceForm: "距離感",
-        proposedCanonicalLabel: "距離感",
       },
       {
         action: "new",
         evidenceRef: "M001:E01",
         surfaceForm: "自動化",
-        proposedCanonicalLabel: "自動化",
       },
       {
         action: "new",
         evidenceRef: "M001:E01",
         surfaceForm: "距離感",
-        proposedCanonicalLabel: "距離感",
       },
       {
         action: "new",
         evidenceRef: "M001:E01",
         surfaceForm: "ChatGPT",
-        proposedCanonicalLabel: "ChatGPT",
       },
       {
         action: "new",
         evidenceRef: "M001:E01",
         surfaceForm: "Claude",
-        proposedCanonicalLabel: "Claude",
       },
     ],
   });
@@ -279,7 +331,7 @@ test("SKIP / UNCERTAIN / REJECTED を区別し、unknown ConceptRef は reject �
       {
         action: "match",
         evidenceRef: "M001:E01",
-        surfaceForm: "高性能AI",
+        surfaceForm: "自動化",
         existingConceptRef: "C99",
       },
     ],
@@ -314,13 +366,11 @@ test("provenance は Unit から Server が構築し AI action は決めない",
         action: "new",
         evidenceRef: "M001:E01",
         surfaceForm: "高性能AI",
-        proposedCanonicalLabel: "AI性能",
       },
       {
         action: "new",
         evidenceRef: "M002:E01",
         surfaceForm: "距離感",
-        proposedCanonicalLabel: "距離感",
       },
     ],
   });
@@ -338,24 +388,26 @@ test("provenance は Unit から Server が構築し AI action は決めない",
 
 test("generic / 結合 Concept は reject し Occurrence は validator を通る", () => {
   const result = resolve({
+    units: [
+      unit({
+        text: "方法と自動化と人間判断と距離感について同じ文で触れていますよ今",
+      }),
+    ],
     actions: [
       {
         action: "new",
         evidenceRef: "M001:E01",
         surfaceForm: "方法",
-        proposedCanonicalLabel: "方法",
       },
       {
         action: "new",
         evidenceRef: "M001:E01",
-        surfaceForm: "自動化",
-        proposedCanonicalLabel: "自動化と人間判断",
+        surfaceForm: "自動化と人間判断",
       },
       {
         action: "new",
         evidenceRef: "M001:E01",
         surfaceForm: "距離感",
-        proposedCanonicalLabel: "距離感",
       },
     ],
   });
@@ -386,13 +438,11 @@ test("敬称付きラベルは minimal heuristic で拒否し、普通の Concep
         action: "new",
         evidenceRef: "M001:E01",
         surfaceForm: "田中さん",
-        proposedCanonicalLabel: "田中さん",
       },
       {
         action: "new",
         evidenceRef: "M001:E01",
         surfaceForm: "距離感",
-        proposedCanonicalLabel: "距離感",
       },
     ],
   });
@@ -408,7 +458,6 @@ test("Session A の NEW を仮想 Catalog へ追加し Session B から MATCH �
         action: "new",
         evidenceRef: "M001:E01",
         surfaceForm: "高性能AI",
-        proposedCanonicalLabel: "AI性能",
       },
     ],
   });
@@ -435,7 +484,7 @@ test("Session A の NEW を仮想 Catalog へ追加し Session B から MATCH �
   assert.equal(sessionB.newConcepts.length, 0);
   assert.equal(sessionB.occurrences[0]?.resolvedAs, "match");
   assert.equal(sessionB.occurrences[0]?.conceptId, created.conceptId);
-  assert.equal(sessionB.occurrences[0]?.canonicalLabel, "AI性能");
+  assert.equal(sessionB.occurrences[0]?.canonicalLabel, "高性能AI");
   assert.equal(sessionB.occurrences[0]?.sessionId, "session-b");
 });
 
@@ -451,7 +500,6 @@ test("同じ入力と fake actions から同じ結果になる", () => {
         action: "new",
         evidenceRef: "M001:E01",
         surfaceForm: "高性能AI",
-        proposedCanonicalLabel: "AI性能",
       },
       { action: "skip", evidenceRef: "M001:E01", surfaceForm: "方法" },
     ] satisfies ConceptExtractAction[],
@@ -475,15 +523,13 @@ test("metrics は match / new / skip / uncertain / rejected を分けて集計�
         action: "new",
         evidenceRef: "M001:E01",
         surfaceForm: "自動化",
-        proposedCanonicalLabel: "自動化",
       },
       { action: "skip", evidenceRef: "M001:E01", surfaceForm: "方法" },
       { action: "uncertain", evidenceRef: "M001:E01", surfaceForm: "田中さん" },
       {
         action: "new",
         evidenceRef: "M001:E01",
-        surfaceForm: "高性能AI",
-        proposedCanonicalLabel: "方法",
+        surfaceForm: "方法",
       },
     ],
   });
@@ -497,4 +543,26 @@ test("metrics は match / new / skip / uncertain / rejected を分けて集計�
   assert.equal(metrics.occurrences, 2);
   assert.equal(metrics.uniqueConceptCandidates, 2);
   assert.ok(metrics.rejectReasons["invalid_candidate:generic_term"]);
+});
+
+test("敬称付き surface は Concept ごと拒否する", () => {
+  const birthday = unit({
+    text: "マエさんの誕生日について迷っていますよ今",
+  });
+  const result = resolve({
+    units: [birthday],
+    actions: [
+      {
+        action: "new",
+        evidenceRef: "M001:E01",
+        surfaceForm: "マエさんの誕生日",
+      },
+    ],
+  });
+  assert.equal(result.newConcepts.length, 0);
+  assert.equal(result.rejected[0]?.reason, "honorific_person");
+  assert.equal(result.outcomes[0]?.surfaceForm, "マエさんの誕生日");
+  const metrics = summarizeConceptResolve(1, result);
+  assert.equal(metrics.new, 0);
+  assert.equal(metrics.rejected, 1);
 });

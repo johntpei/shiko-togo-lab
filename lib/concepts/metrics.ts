@@ -9,9 +9,12 @@ export type ConceptResolveMetrics = {
   rejected: number;
   occurrences: number;
   uniqueConceptCandidates: number;
-  aliases: number;
-  rejectReasons: Record<string, number>;
-};
+    aliases: number;
+    aliasRejected: number;
+    provisionalMatch: number;
+    rejectReasons: Record<string, number>;
+    aliasRejectReasons: Record<string, number>;
+  };
 
 export function summarizeConceptResolve(
   processedUnits: number,
@@ -23,6 +26,11 @@ export function summarizeConceptResolve(
       ? `${item.reason}:${item.detail}`
       : item.reason;
     rejectReasons[key] = (rejectReasons[key] ?? 0) + 1;
+  }
+  const aliasRejectReasons: Record<string, number> = {};
+  for (const item of result.rejectedAliases) {
+    aliasRejectReasons[item.reason] =
+      (aliasRejectReasons[item.reason] ?? 0) + 1;
   }
 
   const uniqueConceptCandidates = new Set(
@@ -40,6 +48,9 @@ export function summarizeConceptResolve(
     occurrences: result.occurrences.length,
     uniqueConceptCandidates,
     aliases: result.aliasCandidates.length,
+    aliasRejected: result.rejectedAliases.length,
+    provisionalMatch: result.provisionalMatches.length,
     rejectReasons,
+    aliasRejectReasons,
   };
 }

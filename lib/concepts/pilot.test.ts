@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import type { StructuredGenerateRequest } from "@/lib/ai/provider";
+import type { ConceptExtractOutput } from "@/lib/ai/concept-extract-schema";
 import {
   CONCEPT_PILOT_APPLY_ERROR,
   parseConceptPilotArgs,
@@ -9,6 +10,7 @@ import {
   sortPilotSessions,
   type ConceptPilotSessionRecord,
 } from "./pilot";
+import { prepareUserEvidenceUnits } from "./user-units";
 
 const LONG_USER =
   "高性能AIについて詳しく話したいと思っています。距離感の話も続けます。";
@@ -21,6 +23,26 @@ function session(
     sessionId: id,
     occurredAt,
     messages: [{ id: `${id}-u`, role: "user", content: LONG_USER }],
+  };
+}
+
+function coverSession(
+  record: ConceptPilotSessionRecord,
+  patches: Record<string, ConceptExtractOutput["units"][number]>,
+): ConceptExtractOutput {
+  const units = prepareUserEvidenceUnits(record);
+  return {
+    units: units.map((unit) => {
+      const patch = patches[unit.evidenceRef];
+      if (patch) {
+        return patch;
+      }
+      return {
+        evidenceRef: unit.evidenceRef,
+        disposition: "skip" as const,
+        concepts: [],
+      };
+    }),
   };
 }
 
@@ -107,31 +129,35 @@ test("Session A の NEW が Session B の catalog に存在する", async () => 
           prompts.push(request.user);
           if (prompts.length === 1) {
             return {
-              parsed: {
-                items: [
-                  {
-                    action: "new",
-                    evidenceRef: "M001:E01",
-                    surfaceForm: "高性能AI",
-                    proposedCanonicalLabel: "AI性能",
-                    aliases: [],
-                  },
-                ],
-              },
+              parsed: coverSession(sessions.get("session-a")!, {
+                "M001:E01": {
+                  evidenceRef: "M001:E01",
+                  disposition: "extracted",
+                  concepts: [
+                    {
+                      action: "new",
+                      surfaceForm: "高性能AI",
+                    },
+                  ],
+                },
+              }),
               model: "test-model",
             };
           }
           return {
-            parsed: {
-              items: [
-                {
-                  action: "match",
-                  evidenceRef: "M001:E01",
-                  surfaceForm: "高性能AI",
-                  existingConceptRef: "C01",
-                },
-              ],
-            },
+            parsed: coverSession(sessions.get("session-b")!, {
+              "M001:E01": {
+                evidenceRef: "M001:E01",
+                disposition: "extracted",
+                concepts: [
+                  {
+                    action: "match",
+                    surfaceForm: "高性能AI",
+                    existingConceptRef: "C01",
+                  },
+                ],
+              },
+            }),
             model: "test-model",
           };
         },
@@ -144,12 +170,14 @@ test("Session A の NEW が Session B の catalog に存在する", async () => 
     if (!result.ok) {
       return;
     }
-    assert.match(prompts[1] ?? "", /C01 \| AI性能/);
-    assert.equal(result.report.concepts[0]?.canonicalLabel, "AI性能");
+    assert.match(prompts[1] ?? "", /C01 \| 高性能AI/);
+    assert.equal(result.report.concepts[0]?.canonicalLabel, "高性能AI");
     assert.equal(result.report.concepts[0]?.distinctSessionCount, 2);
     assert.equal(result.report.totals.new, 1);
     assert.equal(result.report.totals.match, 1);
     assert.equal(result.report.metadata.selectedSessionIds[0], "session-b");
+    assert.equal(result.report.metadata.promptVersion, "concept-extract-prompt-v5");
+    assert.equal(result.report.metadata.extractionVersion, "concept-extraction-v1");
   });
 });
 
@@ -170,17 +198,18 @@ test("1 Session 失敗でも次を処理し、Unit 全文は JSON に入れな�
             throw new Error("boom");
           }
           return {
-            parsed: {
-              items: [
-                {
-                  action: "new",
-                  evidenceRef: "M001:E01",
-                  surfaceForm: "高性能AI",
-                  proposedCanonicalLabel: "AI性能",
-                  aliases: [],
-                },
-              ],
-            },
+            parsed: coverSession(sessions.get("session-a")!, {
+              "M001:E01": {
+                evidenceRef: "M001:E01",
+                disposition: "extracted",
+                concepts: [
+                  {
+                    action: "new",
+                    surfaceForm: "高性能AI",
+                  },
+                ],
+              },
+            }),
             model: "test-model",
             usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7 },
           };
@@ -197,7 +226,9 @@ test("1 Session 失敗でも次を処理し、Unit 全文は JSON に入れな�
     assert.equal(calls, 3);
     assert.equal(result.report.failedSessions.length, 1);
     assert.equal(result.report.failedSessions[0]?.sessionId, "session-b");
-    assert.equal(result.report.totals.apiCalls, 2);
+    assert.equal(result.report.totals.apiCalls, 3);
+    assert.equal(result.report.totals.llmCallsActual, 3);
+    assert.equal(result.report.totals.retryCalls, 0);
     const json = JSON.stringify(result.report);
     assert.doesNotMatch(json, /高性能AIについて詳しく話したい/);
     assert.equal("units" in result.report, false);

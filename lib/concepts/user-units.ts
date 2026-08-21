@@ -81,3 +81,7 @@ export function formatUserEvidenceUnitsForLlm(
     .map((unit) => `[${unit.evidenceRef}][USER] ${unit.text}`)
     .join("\n\n");
 }
+
+export function listRequiredEvidenceRefs(units: ConceptExtractUnit[]) {
+  return units.map((unit) => unit.evidenceRef);
+}

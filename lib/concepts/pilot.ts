@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { CONCEPT_EXTRACT_PROMPT_VERSION } from "@/lib/ai/prompts/concept-extract";
+import { addStructuredUsage } from "@/lib/ai/provider";
 import type {
   AiProvider,
   StructuredGenerateUsage,
@@ -17,7 +18,11 @@ import {
   type SuspiciousFinding,
 } from "./suspicious";
 import type { ConceptExtractMessage } from "./user-units";
-import type { ConceptOccurrenceOperation } from "./resolve";
+import type {
+  ConceptActionOutcome,
+  ConceptOccurrenceOperation,
+  ConceptProvisionalMatch,
+} from "./resolve";
 
 export const CONCEPT_PILOT_DEFAULT_OUTPUT = "data/concept-pilot.json";
 export const CONCEPT_PILOT_APPLY_ERROR = "apply is not implemented in 3C-1b";
@@ -51,9 +56,12 @@ export type ConceptPilotActionRow = {
   surfaceForm: string;
   originalAction: string;
   resolvedAs: string | null;
+  matchKind: string | null;
   conceptRef: string | null;
   canonicalLabel: string | null;
   aliases: string[];
+  candidateConceptRef: string | null;
+  existingCanonicalLabel: string | null;
   rejectReason: string | null;
 };
 
@@ -90,10 +98,23 @@ export type ConceptPilotReport = {
     occurrences: number;
     uniqueConceptCandidates: number;
     aliases: number;
+    aliasRejected: number;
+    provisionalMatch: number;
+    llmCallsActual: number;
+    retryCalls: number;
+    repairedSessions: number;
+    coverageFailedSessions: number;
     failedSessions: number;
   };
   concepts: ConceptPilotConceptRow[];
   actions: ConceptPilotActionRow[];
+  provisionalMatches: Array<{
+    sessionId: string;
+    evidenceRef: string;
+    surfaceForm: string;
+    candidateConceptRef: string;
+    existingCanonicalLabel: string;
+  }>;
   failedSessions: ConceptPilotFailedSession[];
   suspicious: SuspiciousFinding[];
 };
@@ -155,26 +176,6 @@ export function sortPilotSessions<T extends { sessionId: string; occurredAt: str
   });
 }
 
-function addUsage(
-  current: StructuredGenerateUsage,
-  next: StructuredGenerateUsage | null,
-): StructuredGenerateUsage {
-  if (!next) {
-    return current;
-  }
-  const sum = (a: number | null, b: number | null) => {
-    if (a == null && b == null) {
-      return null;
-    }
-    return (a ?? 0) + (b ?? 0);
-  };
-  return {
-    inputTokens: sum(current.inputTokens, next.inputTokens),
-    outputTokens: sum(current.outputTokens, next.outputTokens),
-    totalTokens: sum(current.totalTokens, next.totalTokens),
-  };
-}
-
 export function writeConceptPilotReportFile(
   path: string,
   report: ConceptPilotReport,
@@ -195,7 +196,8 @@ export function formatConceptPilotSummary(report: ConceptPilotReport) {
     "Concept extraction dry-run",
     `sessions: ${report.totals.sessions - report.totals.failedSessions} processed / ${report.totals.failedSessions} failed`,
     `units: ${report.totals.processedUnits}`,
-    `NEW: ${report.totals.new}  MATCH: ${report.totals.match}  SKIP: ${report.totals.skip}  UNCERTAIN: ${report.totals.uncertain}  rejected: ${report.totals.rejected}`,
+    `NEW: ${report.totals.new}  MATCH: ${report.totals.match}  SKIP: ${report.totals.skip}  UNCERTAIN: ${report.totals.uncertain}  rejected: ${report.totals.rejected}  provisional: ${report.totals.provisionalMatch}`,
+    `llmCalls: ${report.totals.llmCallsActual}  retries: ${report.totals.retryCalls}  repaired: ${report.totals.repairedSessions}  coverageFailed: ${report.totals.coverageFailedSessions}`,
     `concepts: ${report.concepts.length}`,
     `failed: ${failed}`,
     `report: ${report.metadata.outputPath}`,
@@ -241,20 +243,26 @@ export async function runConceptPilot(
   let catalog: ConceptRegistrySnapshot = emptyConceptCatalog();
   const actions: ConceptPilotActionRow[] = [];
   const occurrences: ConceptOccurrenceOperation[] = [];
+  const provisionalMatches: ConceptPilotReport["provisionalMatches"] = [];
   let processedUnits = 0;
-  let apiCalls = 0;
-  let usage: StructuredGenerateUsage = {
-    inputTokens: null,
-    outputTokens: null,
-    totalTokens: null,
-  };
+  let llmCallsActual = 0;
+  let retryCalls = 0;
+  let repairedSessions = 0;
+  let coverageFailedSessions = 0;
+  let usage: StructuredGenerateUsage | null = null;
   let match = 0;
   let created = 0;
   let skip = 0;
   let uncertain = 0;
   let rejected = 0;
   let aliasCount = 0;
+  let aliasRejected = 0;
+  let provisionalMatch = 0;
   let model: string | null = null;
+  const outcomesForSuspicious: ConceptActionOutcome[] = [];
+  const allProvisional: ConceptProvisionalMatch[] = [];
+  const sessionUnitCounts: Array<{ sessionId: string; userUnitCount: number }> =
+    [];
 
   for (const session of ordered) {
     try {
@@ -267,7 +275,13 @@ export async function runConceptPilot(
         },
         { generateStructured: deps.generateStructured },
       );
+      llmCallsActual += result.apiCalls ?? 0;
+      retryCalls += result.retryCalls ?? 0;
+      usage = addStructuredUsage(usage, result.usage ?? null);
       if (!result.ok) {
+        if (result.code === "coverage") {
+          coverageFailedSessions += 1;
+        }
         failedSessions.push({
           sessionId: session.sessionId,
           code: result.code,
@@ -275,10 +289,15 @@ export async function runConceptPilot(
         });
         continue;
       }
+      if (result.repaired) {
+        repairedSessions += 1;
+      }
       catalog = result.resolve.nextCatalog;
       processedUnits += result.units.length;
-      apiCalls += result.apiCalls;
-      usage = addUsage(usage, result.usage);
+      sessionUnitCounts.push({
+        sessionId: session.sessionId,
+        userUnitCount: result.units.length,
+      });
       model = result.model || model;
       const metrics = summarizeConceptResolve(
         result.units.length,
@@ -290,7 +309,20 @@ export async function runConceptPilot(
       uncertain += metrics.uncertain;
       rejected += metrics.rejected;
       aliasCount += metrics.aliases;
+      aliasRejected += metrics.aliasRejected;
+      provisionalMatch += metrics.provisionalMatch;
       occurrences.push(...result.resolve.occurrences);
+      outcomesForSuspicious.push(...result.resolve.outcomes);
+      allProvisional.push(...result.resolve.provisionalMatches);
+      for (const item of result.resolve.provisionalMatches) {
+        provisionalMatches.push({
+          sessionId: session.sessionId,
+          evidenceRef: item.evidenceRef,
+          surfaceForm: item.surfaceForm,
+          candidateConceptRef: item.candidateConceptRef,
+          existingCanonicalLabel: item.existingCanonicalLabel,
+        });
+      }
       for (const outcome of result.resolve.outcomes) {
         actions.push({
           sessionId: session.sessionId,
@@ -298,9 +330,12 @@ export async function runConceptPilot(
           surfaceForm: outcome.surfaceForm,
           originalAction: outcome.originalAction,
           resolvedAs: outcome.resolvedAs ?? outcome.status,
+          matchKind: outcome.matchKind ?? null,
           conceptRef: outcome.conceptRef ?? null,
           canonicalLabel: outcome.canonicalLabel ?? null,
           aliases: outcome.aliases ?? [],
+          candidateConceptRef: outcome.candidateConceptRef ?? null,
+          existingCanonicalLabel: outcome.existingCanonicalLabel ?? null,
           rejectReason: outcome.rejectReason
             ? outcome.detail
               ? `${outcome.rejectReason}:${outcome.detail}`
@@ -355,10 +390,14 @@ export async function runConceptPilot(
     totals: {
       sessions: parsed.sessionIds.length,
       processedUnits,
-      apiCalls,
-      inputTokens: usage.inputTokens,
-      outputTokens: usage.outputTokens,
-      totalTokens: usage.totalTokens,
+      apiCalls: llmCallsActual,
+      llmCallsActual,
+      retryCalls,
+      repairedSessions,
+      coverageFailedSessions,
+      inputTokens: usage?.inputTokens ?? null,
+      outputTokens: usage?.outputTokens ?? null,
+      totalTokens: usage?.totalTokens ?? null,
       match,
       new: created,
       skip,
@@ -367,12 +406,21 @@ export async function runConceptPilot(
       occurrences: occurrences.length,
       uniqueConceptCandidates: catalog.entries.length,
       aliases: aliasCount,
+      aliasRejected,
+      provisionalMatch,
       failedSessions: failedSessions.length,
     },
     concepts,
     actions,
+    provisionalMatches,
     failedSessions,
-    suspicious: detectSuspiciousConcepts({ catalog, occurrences }),
+    suspicious: detectSuspiciousConcepts({
+      catalog,
+      occurrences,
+      outcomes: outcomesForSuspicious,
+      provisionalMatches: allProvisional,
+      sessionUnitCounts,
+    }),
   };
 
   const writer = deps.writeReport ?? writeConceptPilotReportFile;

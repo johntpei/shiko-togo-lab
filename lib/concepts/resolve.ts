@@ -1,9 +1,9 @@
 import type { ConceptExtractAction } from "./actions";
+import { MAX_CONCEPTS_PER_UNIT } from "./actions";
 import {
   addAliasesToCatalog,
   addConceptToCatalog,
   cloneConceptCatalog,
-  collectAliasCandidates,
   lookupCatalogByConceptId,
   lookupCatalogByNormalizedKey,
   lookupCatalogByRef,
@@ -13,7 +13,9 @@ import {
 } from "./catalog";
 import { validateConceptCandidate } from "./candidate";
 import { groundSurfaceForm, lookupExtractUnit } from "./grounding";
-import { isHonorificPersonLabel } from "./honorific";
+import { containsHonorificPerson } from "./honorific";
+import type { ConceptMatchKind } from "./identity";
+import { classifyServerIdentity } from "./identity";
 import { normalizeConceptKey } from "./normalize";
 import { conceptThoughtOccurredAt } from "./occurred-at";
 import { validateConceptOccurrence } from "./occurrence";
@@ -27,7 +29,7 @@ import {
   type ConceptExtractUnit,
 } from "./user-units";
 
-export const MAX_CONCEPTS_PER_UNIT = 3;
+export { MAX_CONCEPTS_PER_UNIT } from "./actions";
 
 export const CONCEPT_RESOLVE_REJECT_REASONS = [
   "empty_surface",
@@ -56,6 +58,7 @@ export type ConceptNewConceptOperation = {
 export type ConceptOccurrenceOperation = {
   type: "occurrence";
   resolvedAs: "match" | "new";
+  matchKind?: ConceptMatchKind;
   conceptId: string;
   canonicalLabel: string;
   sessionId: string;
@@ -100,15 +103,35 @@ export type ConceptRejectedOperation = {
   detail?: string;
 };
 
+export type ConceptRejectedAlias = {
+  type: "alias_rejected";
+  aliasLabel: string;
+  reason: string;
+  evidenceRef?: string;
+  conceptId?: string;
+};
+
+export type ConceptProvisionalMatch = {
+  type: "provisional_match";
+  kind: "semantic";
+  evidenceRef: string;
+  surfaceForm: string;
+  candidateConceptRef: string;
+  existingCanonicalLabel: string;
+};
+
 export type ConceptActionOutcome = {
   originalAction: ConceptExtractAction["action"];
   evidenceRef: string;
   surfaceForm: string;
-  status: "skip" | "uncertain" | "rejected" | "accepted";
+  status: "skip" | "uncertain" | "rejected" | "accepted" | "provisional_match";
   resolvedAs?: "match" | "new";
+  matchKind?: ConceptMatchKind;
   conceptRef?: string;
   canonicalLabel?: string;
   aliases?: string[];
+  candidateConceptRef?: string;
+  existingCanonicalLabel?: string;
   rejectReason?: ConceptResolveRejectReason;
   detail?: string;
 };
@@ -122,6 +145,8 @@ export type ConceptResolveResult = {
   skipped: ConceptSkippedOperation[];
   uncertain: ConceptUncertainOperation[];
   rejected: ConceptRejectedOperation[];
+  rejectedAliases: ConceptRejectedAlias[];
+  provisionalMatches: ConceptProvisionalMatch[];
   outcomes: ConceptActionOutcome[];
 };
 
@@ -135,6 +160,7 @@ type ResolvedIdentity = {
   conceptId: string;
   canonicalLabel: string;
   resolvedAs: "match" | "new";
+  matchKind?: ConceptMatchKind;
   aliases: string[];
 };
 
@@ -204,6 +230,8 @@ export function resolveConceptActions(
   const skipped: ConceptSkippedOperation[] = [];
   const uncertain: ConceptUncertainOperation[] = [];
   const rejected: ConceptRejectedOperation[] = [];
+  const rejectedAliases: ConceptRejectedAlias[] = [];
+  const provisionalMatches: ConceptProvisionalMatch[] = [];
   const outcomes: ConceptActionOutcome[] = [];
   const acceptedByUnit = new Map<string, Set<string>>();
   const createdInBatch = new Set<string>();
@@ -309,6 +337,7 @@ export function resolveConceptActions(
     const occurrence: ConceptOccurrenceOperation = {
       type: "occurrence",
       resolvedAs: identity.resolvedAs,
+      matchKind: identity.matchKind,
       canonicalLabel: identity.canonicalLabel,
       ...occurrenceInput,
     };
@@ -322,16 +351,18 @@ export function resolveConceptActions(
       surfaceForm: action.surfaceForm,
       status: "accepted",
       resolvedAs: identity.resolvedAs,
+      matchKind: identity.matchKind,
       conceptRef: lookupCatalogByConceptId(catalog, identity.conceptId)?.ref,
       canonicalLabel: identity.canonicalLabel,
       aliases: identity.aliases,
     });
   };
 
-  const resolveNewIdentity = (
-    action: Extract<ConceptExtractAction, { action: "new" }>,
+  const resolveNewFromSurface = (
+    action: Extract<ConceptExtractAction, { action: "new" | "match" }>,
+    matchKind?: ConceptMatchKind,
   ): ResolvedIdentity | ConceptRejectedOperation => {
-    const candidate = validateConceptCandidate(action.proposedCanonicalLabel);
+    const candidate = validateConceptCandidate(action.surfaceForm);
     if (!candidate.ok) {
       return reject({
         reason: "invalid_candidate",
@@ -341,7 +372,7 @@ export function resolveConceptActions(
         detail: candidate.reason,
       });
     }
-    if (isHonorificPersonLabel(candidate.canonicalLabel)) {
+    if (containsHonorificPerson(candidate.canonicalLabel)) {
       return reject({
         reason: "honorific_person",
         evidenceRef: action.evidenceRef,
@@ -349,11 +380,16 @@ export function resolveConceptActions(
         action: action.action,
       });
     }
-    const aliases = collectAliasCandidates({
-      canonicalLabel: candidate.canonicalLabel,
-      surfaceForm: action.surfaceForm,
-      proposedAliases: action.aliases,
-    });
+    const server = classifyServerIdentity(catalog, candidate.canonicalLabel);
+    if (server.kind === "exact" || server.kind === "observed_alias") {
+      return {
+        conceptId: server.entry.conceptId,
+        canonicalLabel: server.entry.canonicalLabel,
+        resolvedAs: createdInBatch.has(server.entry.conceptId) ? "new" : "match",
+        matchKind: server.kind,
+        aliases: [],
+      };
+    }
     const existing = lookupCatalogByNormalizedKey(
       catalog,
       candidate.normalizedKey,
@@ -363,20 +399,32 @@ export function resolveConceptActions(
         conceptId: existing.conceptId,
         canonicalLabel: existing.canonicalLabel,
         resolvedAs: createdInBatch.has(existing.conceptId) ? "new" : "match",
-        aliases,
+        matchKind: "exact",
+        aliases: [],
       };
     }
     return {
       conceptId: virtualConceptId(candidate.normalizedKey),
       canonicalLabel: candidate.canonicalLabel,
       resolvedAs: "new",
-      aliases,
+      matchKind,
+      aliases: [],
     };
   };
 
-  const resolveMatchIdentity = (
+  const resolveLlmMatch = (
     action: Extract<ConceptExtractAction, { action: "match" }>,
   ): ResolvedIdentity | ConceptRejectedOperation => {
+    const server = classifyServerIdentity(catalog, action.surfaceForm);
+    if (server.kind === "exact" || server.kind === "observed_alias") {
+      return {
+        conceptId: server.entry.conceptId,
+        canonicalLabel: server.entry.canonicalLabel,
+        resolvedAs: createdInBatch.has(server.entry.conceptId) ? "new" : "match",
+        matchKind: server.kind,
+        aliases: [],
+      };
+    }
     const existing = lookupCatalogByRef(catalog, action.existingConceptRef);
     if (!existing) {
       return reject({
@@ -387,12 +435,24 @@ export function resolveConceptActions(
         detail: action.existingConceptRef,
       });
     }
-    return {
-      conceptId: existing.conceptId,
-      canonicalLabel: existing.canonicalLabel,
-      resolvedAs: "match",
-      aliases: [],
-    };
+    provisionalMatches.push({
+      type: "provisional_match",
+      kind: "semantic",
+      evidenceRef: action.evidenceRef,
+      surfaceForm: action.surfaceForm,
+      candidateConceptRef: existing.ref,
+      existingCanonicalLabel: existing.canonicalLabel,
+    });
+    outcomes.push({
+      originalAction: "match",
+      evidenceRef: action.evidenceRef,
+      surfaceForm: action.surfaceForm,
+      status: "provisional_match",
+      matchKind: "semantic",
+      candidateConceptRef: existing.ref,
+      existingCanonicalLabel: existing.canonicalLabel,
+    });
+    return resolveNewFromSurface(action, "semantic");
   };
 
   for (const action of input.actions) {
@@ -456,8 +516,8 @@ export function resolveConceptActions(
 
     const identity =
       action.action === "match"
-        ? resolveMatchIdentity(action)
-        : resolveNewIdentity(action);
+        ? resolveLlmMatch(action)
+        : resolveNewFromSurface(action);
     if (isRejectedOperation(identity)) {
       recordRejected(identity);
       continue;
@@ -475,6 +535,8 @@ export function resolveConceptActions(
     skipped,
     uncertain,
     rejected,
+    rejectedAliases,
+    provisionalMatches,
     outcomes,
   };
 }

@@ -1,84 +1,114 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { conceptExtractOutputSchema } from "./concept-extract-schema";
+import { CONCEPT_EXTRACT_SCHEMA_NAME, conceptExtractOutputSchema } from "./concept-extract-schema";
 
-test("MATCH / NEW / SKIP / UNCERTAIN を受け付ける", () => {
+test("schema name は concept_extract_v3 のまま", () => {
+  assert.equal(CONCEPT_EXTRACT_SCHEMA_NAME, "concept_extract_v3");
+});
+
+test("extracted / skip / uncertain を Unit 単位で受け付ける", () => {
   const parsed = conceptExtractOutputSchema.safeParse({
-    items: [
+    units: [
       {
-        action: "match",
         evidenceRef: "M001:E01",
-        surfaceForm: "高性能AI",
-        existingConceptRef: "C01",
+        disposition: "extracted",
+        concepts: [
+          {
+            action: "match",
+            surfaceForm: "高性能AI",
+            existingConceptRef: "C01",
+          },
+          {
+            action: "new",
+            surfaceForm: "距離感",
+          },
+        ],
       },
       {
-        action: "new",
-        evidenceRef: "M003:E01",
-        surfaceForm: "距離感",
-        proposedCanonicalLabel: "距離感",
-        aliases: ["対人距離"],
+        evidenceRef: "M001:E02",
+        disposition: "skip",
+        concepts: [],
       },
       {
-        action: "skip",
         evidenceRef: "M003:E01",
-        surfaceForm: "方法",
-      },
-      {
-        action: "uncertain",
-        evidenceRef: "M003:E01",
-        surfaceForm: "それ",
+        disposition: "uncertain",
+        concepts: [],
       },
     ],
   });
   assert.equal(parsed.success, true);
 });
 
-test("aliases は最大2件。3件は拒否する", () => {
-  const ok = conceptExtractOutputSchema.safeParse({
-    items: [
+test("NEW は surfaceForm のみ。canonical / aliases を要求しない", () => {
+  const parsed = conceptExtractOutputSchema.safeParse({
+    units: [
       {
-        action: "new",
         evidenceRef: "M001:E01",
-        surfaceForm: "高性能AI",
-        proposedCanonicalLabel: "AI性能",
-        aliases: ["高性能AI", "AIの性能"],
+        disposition: "extracted",
+        concepts: [
+          {
+            action: "new",
+            surfaceForm: "高性能AI",
+          },
+        ],
       },
     ],
   });
-  assert.equal(ok.success, true);
+  assert.equal(parsed.success, true);
+  if (parsed.success) {
+    const concept = parsed.data.units[0]?.concepts[0];
+    assert.equal(concept && "proposedCanonicalLabel" in concept, false);
+    assert.equal(concept && "aliases" in concept, false);
+  }
+});
 
-  const tooMany = conceptExtractOutputSchema.safeParse({
-    items: [
+test("extracted は最大3 Concept。旧 items 形式は拒否する", () => {
+  const tooManyConcepts = conceptExtractOutputSchema.safeParse({
+    units: [
       {
-        action: "new",
         evidenceRef: "M001:E01",
-        surfaceForm: "高性能AI",
-        proposedCanonicalLabel: "AI性能",
-        aliases: ["a", "b", "c"],
+        disposition: "extracted",
+        concepts: [
+          { action: "new", surfaceForm: "a" },
+          { action: "new", surfaceForm: "b" },
+          { action: "new", surfaceForm: "c" },
+          { action: "new", surfaceForm: "d" },
+        ],
       },
     ],
   });
-  assert.equal(tooMany.success, false);
+  assert.equal(tooManyConcepts.success, false);
+  assert.equal(
+    conceptExtractOutputSchema.safeParse({
+      items: [{ action: "skip", evidenceRef: "M001:E01", surfaceForm: "x" }],
+    }).success,
+    false,
+  );
 });
 
 test("不正 schema は拒否する", () => {
   assert.equal(
-    conceptExtractOutputSchema.safeParse({ items: "nope" }).success,
+    conceptExtractOutputSchema.safeParse({ units: "nope" }).success,
     false,
   );
   assert.equal(
     conceptExtractOutputSchema.safeParse({
-      items: [{ action: "merge", evidenceRef: "M001:E01", surfaceForm: "x" }],
+      units: [{ evidenceRef: "M001:E01", disposition: "merge", concepts: [] }],
     }).success,
     false,
   );
   assert.equal(
     conceptExtractOutputSchema.safeParse({
-      items: [
+      units: [
         {
-          action: "match",
           evidenceRef: "M001:E01",
-          surfaceForm: "高性能AI",
+          disposition: "extracted",
+          concepts: [
+            {
+              action: "match",
+              surfaceForm: "高性能AI",
+            },
+          ],
         },
       ],
     }).success,

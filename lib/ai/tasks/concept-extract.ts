@@ -4,13 +4,14 @@ import { ANALYZE_SESSION_TIMEOUT_MS, isAnalyzeInputTooLong } from "../limits";
 import {
   CONCEPT_EXTRACT_PROMPT_VERSION,
   CONCEPT_EXTRACT_SYSTEM_PROMPT,
+  buildConceptExtractRepairUserPrompt,
   buildConceptExtractUserPrompt,
 } from "../prompts/concept-extract";
 import type {
   AiProvider,
   StructuredGenerateUsage,
 } from "../provider";
-import { getAiProvider } from "../provider";
+import { addStructuredUsage, getAiProvider } from "../provider";
 import {
   CONCEPT_EXTRACT_SCHEMA_NAME,
   conceptExtractOutputSchema,
@@ -19,9 +20,11 @@ import {
 import type { ConceptExtractAction } from "@/lib/concepts/actions";
 import type { ConceptRegistrySnapshot } from "@/lib/concepts/catalog";
 import { emptyConceptCatalog } from "@/lib/concepts/catalog";
+import { validateConceptExtractCoverage } from "@/lib/concepts/coverage";
 import { resolveConceptActions } from "@/lib/concepts/resolve";
 import type { ConceptResolveResult } from "@/lib/concepts/resolve";
 import {
+  listRequiredEvidenceRefs,
   prepareUserEvidenceUnits,
   type ConceptExtractMessage,
   type ConceptExtractUnit,
@@ -45,6 +48,8 @@ export type ConceptExtractOk = {
   promptVersion: typeof CONCEPT_EXTRACT_PROMPT_VERSION;
   usage: StructuredGenerateUsage | null;
   apiCalls: number;
+  retryCalls: number;
+  repaired: boolean;
   units: ConceptExtractUnit[];
   actions: ConceptExtractAction[];
   resolve: ConceptResolveResult;
@@ -55,37 +60,56 @@ export type ConceptExtractFail = {
   sessionId: string;
   code: string;
   error: string;
+  usage?: StructuredGenerateUsage | null;
+  apiCalls?: number;
+  retryCalls?: number;
 };
 
 export type ConceptExtractResult = ConceptExtractOk | ConceptExtractFail;
 
-function toExtractActions(
-  items: ConceptExtractOutput["items"],
+export function toExtractActions(
+  output: ConceptExtractOutput,
 ): ConceptExtractAction[] {
-  return items.map((item) => {
-    if (item.action === "match") {
-      return {
-        action: "match",
-        evidenceRef: item.evidenceRef,
-        surfaceForm: item.surfaceForm,
-        existingConceptRef: item.existingConceptRef,
-      };
+  const actions: ConceptExtractAction[] = [];
+  for (const unit of output.units) {
+    if (unit.disposition === "skip") {
+      actions.push({
+        action: "skip",
+        evidenceRef: unit.evidenceRef,
+        surfaceForm: "",
+      });
+      continue;
     }
-    if (item.action === "new") {
-      return {
+    if (unit.disposition === "uncertain") {
+      actions.push({
+        action: "uncertain",
+        evidenceRef: unit.evidenceRef,
+        surfaceForm: "",
+      });
+      continue;
+    }
+    for (const concept of unit.concepts) {
+      if (concept.action === "match") {
+        actions.push({
+          action: "match",
+          evidenceRef: unit.evidenceRef,
+          surfaceForm: concept.surfaceForm,
+          existingConceptRef: concept.existingConceptRef,
+        });
+        continue;
+      }
+      actions.push({
         action: "new",
-        evidenceRef: item.evidenceRef,
-        surfaceForm: item.surfaceForm,
-        proposedCanonicalLabel: item.proposedCanonicalLabel,
-        aliases: item.aliases,
-      };
+        evidenceRef: unit.evidenceRef,
+        surfaceForm: concept.surfaceForm,
+      });
     }
-    return {
-      action: item.action,
-      evidenceRef: item.evidenceRef,
-      surfaceForm: item.surfaceForm,
-    };
-  });
+  }
+  return actions;
+}
+
+function coverageError(reason: string, detail: string) {
+  return `Evidence Unit coverage が不完全です (${reason}: ${detail})`;
 }
 
 export async function runConceptExtractSession(
@@ -109,7 +133,8 @@ export async function runConceptExtractSession(
       error: "未対応のAIプロバイダです",
     };
   }
-  if (!config.model) {
+  const modelName = config.model;
+  if (!modelName) {
     return {
       ok: false,
       sessionId: input.sessionId,
@@ -129,10 +154,12 @@ export async function runConceptExtractSession(
     return {
       ok: true,
       sessionId: input.sessionId,
-      model: config.model,
+      model: modelName,
       promptVersion: CONCEPT_EXTRACT_PROMPT_VERSION,
       usage: null,
       apiCalls: 0,
+      retryCalls: 0,
+      repaired: false,
       units,
       actions: [],
       resolve: resolveConceptActions({ units, catalog, actions: [] }),
@@ -149,37 +176,93 @@ export async function runConceptExtractSession(
     };
   }
 
-  let parsedUnknown: unknown;
-  let usedModel = config.model;
+  const evidenceRefs = listRequiredEvidenceRefs(units);
   let usage: StructuredGenerateUsage | null = null;
-  try {
+  let apiCalls = 0;
+  let retryCalls = 0;
+  let usedModel = modelName;
+
+  const callLlm = async (user: string) => {
+    apiCalls += 1;
     const generated = await deps.generateStructured({
-      model: config.model,
+      model: modelName,
       system: CONCEPT_EXTRACT_SYSTEM_PROMPT,
-      user: userPrompt,
+      user,
       schema: conceptExtractOutputSchema,
       schemaName: CONCEPT_EXTRACT_SCHEMA_NAME,
       timeoutMs: ANALYZE_SESSION_TIMEOUT_MS,
     });
-    parsedUnknown = generated.parsed;
-    usedModel = generated.model || config.model;
-    usage = generated.usage ?? null;
+    usage = addStructuredUsage(usage, generated.usage ?? null);
+    usedModel = generated.model || usedModel;
+    return generated.parsed;
+  };
+
+  const fail = (code: string, error: string): ConceptExtractFail => ({
+    ok: false,
+    sessionId: input.sessionId,
+    code,
+    error,
+    usage,
+    apiCalls,
+    retryCalls,
+  });
+
+  let parsedUnknown: unknown;
+  try {
+    parsedUnknown = await callLlm(userPrompt);
   } catch (error) {
     const mapped = userMessageForAnalyzeError(error);
-    return { ok: false, sessionId: input.sessionId, ...mapped };
+    return fail(mapped.code, mapped.error);
   }
 
-  const parsed = conceptExtractOutputSchema.safeParse(parsedUnknown);
-  if (!parsed.success) {
-    return {
-      ok: false,
-      sessionId: input.sessionId,
-      code: "schema",
-      error: "抽出結果の形式が不正だったため処理しませんでした。",
-    };
+  const firstParsed = conceptExtractOutputSchema.safeParse(parsedUnknown);
+  if (!firstParsed.success) {
+    return fail("schema", "抽出結果の形式が不正だったため処理しませんでした。");
   }
 
-  const actions = toExtractActions(parsed.data.items);
+  let output = firstParsed.data;
+  let coverage = validateConceptExtractCoverage({
+    evidenceRefs,
+    units: output.units,
+  });
+  let repaired = false;
+
+  if (!coverage.ok) {
+    const repairPrompt = buildConceptExtractRepairUserPrompt({
+      catalog,
+      units,
+      coverageReason: coverage.reason,
+      coverageDetail: coverage.detail,
+    });
+    if (isAnalyzeInputTooLong(repairPrompt)) {
+      return fail("coverage", coverageError(coverage.reason, coverage.detail));
+    }
+    try {
+      retryCalls = 1;
+      parsedUnknown = await callLlm(repairPrompt);
+    } catch (error) {
+      const mapped = userMessageForAnalyzeError(error);
+      return fail(mapped.code, mapped.error);
+    }
+    const repairedParsed = conceptExtractOutputSchema.safeParse(parsedUnknown);
+    if (!repairedParsed.success) {
+      return fail(
+        "schema",
+        "抽出結果の形式が不正だったため処理しませんでした。",
+      );
+    }
+    output = repairedParsed.data;
+    coverage = validateConceptExtractCoverage({
+      evidenceRefs,
+      units: output.units,
+    });
+    if (!coverage.ok) {
+      return fail("coverage", coverageError(coverage.reason, coverage.detail));
+    }
+    repaired = true;
+  }
+
+  const actions = toExtractActions(output);
   const resolve = resolveConceptActions({ units, catalog, actions });
 
   return {
@@ -188,7 +271,9 @@ export async function runConceptExtractSession(
     model: usedModel,
     promptVersion: CONCEPT_EXTRACT_PROMPT_VERSION,
     usage,
-    apiCalls: 1,
+    apiCalls,
+    retryCalls,
+    repaired,
     units,
     actions,
     resolve,

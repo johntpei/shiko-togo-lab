@@ -1,4 +1,5 @@
 import { MAX_PROPOSED_ALIASES } from "./actions";
+import { validateAliasCandidate } from "./alias";
 import { normalizeConceptKey, normalizeConceptLabel } from "./normalize";
 
 export type ConceptCatalogEntry = {
@@ -104,18 +105,23 @@ export function uniqueAliasLabels(canonicalLabel: string, labels: string[]) {
 
 export function collectAliasCandidates(input: {
   canonicalLabel: string;
-  surfaceForm: string;
   proposedAliases?: string[];
-}) {
+}): {
+  accepted: string[];
+  rejected: Array<{ aliasLabel: string; reason: string }>;
+} {
   const proposed = (input.proposedAliases ?? []).slice(0, MAX_PROPOSED_ALIASES);
-  const labels = [...proposed];
-  if (
-    normalizeConceptKey(input.surfaceForm) !==
-    normalizeConceptKey(input.canonicalLabel)
-  ) {
-    labels.push(input.surfaceForm);
+  const accepted: string[] = [];
+  const rejected: Array<{ aliasLabel: string; reason: string }> = [];
+  for (const raw of uniqueAliasLabels(input.canonicalLabel, proposed)) {
+    const check = validateAliasCandidate(raw, input.canonicalLabel);
+    if (!check.ok) {
+      rejected.push({ aliasLabel: raw, reason: check.reason });
+      continue;
+    }
+    accepted.push(check.aliasLabel);
   }
-  return uniqueAliasLabels(input.canonicalLabel, labels);
+  return { accepted, rejected };
 }
 
 export function addConceptToCatalog(
