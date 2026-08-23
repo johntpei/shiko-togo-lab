@@ -398,6 +398,8 @@ test("eligibility は Occurrence / Calibration / LLM / write path に依存し�
   );
   assert.match(source, /selectedSessionIds/);
   assert.match(source, /hashSourceArtifactText/);
+  assert.match(source, /hasIncrementalConceptProcessingCheckpoint/);
+  assert.match(source, /incremental_processing_checkpoint/);
   assert.doesNotMatch(source, /conceptOccurrences/);
   assert.doesNotMatch(source, /countConceptOccurrences/);
   assert.doesNotMatch(source, /evaluatePolicyCalibration/);

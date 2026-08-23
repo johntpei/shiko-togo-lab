@@ -249,6 +249,24 @@ export const conceptOccurrences = sqliteTable(
   ],
 );
 
+export const conceptProcessingCheckpoints = sqliteTable(
+  "concept_processing_checkpoints",
+  {
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    processingVersion: text("processing_version").notNull(),
+    completedAt: text("completed_at").notNull(),
+    existingMatchCount: integer("existing_match_count").notNull(),
+    newCandidateCount: integer("new_candidate_count").notNull(),
+    provisionalNewCount: integer("provisional_new_count").notNull(),
+    groundingRejectedCount: integer("grounding_rejected_count").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sessionId, table.processingVersion] }),
+  ],
+);
+
 export type SessionRecord = typeof sessions.$inferSelect;
 export type MessageRecord = typeof messages.$inferSelect;
 export type SourceConversationRecord = typeof sourceConversations.$inferSelect;
@@ -260,3 +278,5 @@ export type ObservationRecord = typeof observations.$inferSelect;
 export type ConceptRecord = typeof concepts.$inferSelect;
 export type ConceptAliasRecord = typeof conceptAliases.$inferSelect;
 export type ConceptOccurrenceRecord = typeof conceptOccurrences.$inferSelect;
+export type ConceptProcessingCheckpointRecord =
+  typeof conceptProcessingCheckpoints.$inferSelect;

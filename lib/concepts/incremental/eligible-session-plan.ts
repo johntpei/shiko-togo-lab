@@ -14,7 +14,7 @@ export type EligibilityGatedIncrementalSessionResult =
   | {
       status: "already_covered";
       sessionId: string;
-      reason: "initial_processing_coverage";
+      reason: "initial_processing_coverage" | "incremental_processing_checkpoint";
     }
   | {
       status: "blocked";
@@ -60,7 +60,10 @@ export async function planEligibleIncrementalSession(input: {
     return {
       status: "already_covered",
       sessionId: input.sessionId,
-      reason: "initial_processing_coverage",
+      reason:
+        eligibility.reason === "incremental_processing_checkpoint"
+          ? "incremental_processing_checkpoint"
+          : "initial_processing_coverage",
     };
   }
 

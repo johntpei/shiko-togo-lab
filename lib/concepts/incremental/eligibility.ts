@@ -4,6 +4,10 @@ import { hashSourceArtifactText } from "@/lib/concepts/admission/apply-manifest"
 import { CONCEPT_EXTRACTION_VERSION } from "@/lib/concepts/types";
 import { sessions } from "@/lib/db/schema";
 import type { ConceptQueryDb } from "@/lib/db/concept-queries";
+import {
+  CONCEPT_INCREMENTAL_PROCESSING_VERSION,
+  hasIncrementalConceptProcessingCheckpoint,
+} from "./checkpoint";
 
 export type InitialConceptProcessingCoverage = {
   sessionIds: string[];
@@ -160,8 +164,9 @@ function loadSessionRow(db: ConceptQueryDb, sessionId: string) {
 }
 
 /**
- * Initial processing coverage に対する Session eligibility。
- * ConceptOccurrence の有無では判定しない。Extraction は実行しない。
+ * Initial processing coverage と Incremental completion checkpoint に対する
+ * Session eligibility。ConceptOccurrence / Concept の有無では判定しない。
+ * Extraction は実行しない。
  */
 export function evaluateIncrementalSessionEligibility(input: {
   sessionId: string;
@@ -197,6 +202,20 @@ export function evaluateIncrementalSessionEligibility(input: {
       status: "already_covered",
       sessionId: input.sessionId,
       reason: "initial_processing_coverage",
+    };
+  }
+
+  if (
+    hasIncrementalConceptProcessingCheckpoint({
+      sessionId: input.sessionId,
+      processingVersion: CONCEPT_INCREMENTAL_PROCESSING_VERSION,
+      db: input.db,
+    })
+  ) {
+    return {
+      status: "already_covered",
+      sessionId: input.sessionId,
+      reason: "incremental_processing_checkpoint",
     };
   }
 

@@ -19,6 +19,10 @@ import {
 import * as schema from "@/lib/db/schema";
 import { planEligibleIncrementalSession } from "./eligible-session-plan";
 import {
+  CONCEPT_INCREMENTAL_PROCESSING_VERSION,
+  markIncrementalConceptSessionCompleted,
+} from "./checkpoint";
+import {
   loadInitialConceptProcessingCoverage,
   type InitialConceptProcessingCoverageLoad,
 } from "./eligibility";
@@ -573,6 +577,40 @@ test("Initial selected + actions=[] でも already_covered", async () => {
   assert.equal(extractor.calls(), 0);
 });
 
+test("incremental checkpoint → already_covered / incremental_processing_checkpoint, extractor=0", async () => {
+  const db = openMemoryDb();
+  seedCoveredAndEligible(db);
+  const written = markIncrementalConceptSessionCompleted(
+    {
+      sessionId: ELIGIBLE,
+      processingVersion: CONCEPT_INCREMENTAL_PROCESSING_VERSION,
+      planning: {
+        status: "no_actions",
+        existingMatchCount: 0,
+        newCandidateCount: 0,
+        provisionalNewCount: 0,
+        groundingRejectedCount: 0,
+      },
+      existing: { completedCount: 0 },
+      newCandidates: { completedCount: 0 },
+    },
+    { db },
+  );
+  assert.equal(written.ok, true);
+  const extractor = countingExtractor();
+  const result = await planEligibleIncrementalSession({
+    sessionId: ELIGIBLE,
+    db,
+    coverage: defaultCoverage(),
+    extractCandidates: extractor.extractCandidates,
+  });
+  assert.equal(result.status, "already_covered");
+  if (result.status === "already_covered") {
+    assert.equal(result.reason, "incremental_processing_checkpoint");
+  }
+  assert.equal(extractor.calls(), 0);
+});
+
 test("boundary は Eligibility を先に通し Safety Engine をコピーしない", () => {
   const source = readFileSync(
     resolve(process.cwd(), "lib/concepts/incremental/eligible-session-plan.ts"),
@@ -580,6 +618,7 @@ test("boundary は Eligibility を先に通し Safety Engine をコピーしな�
   );
   assert.match(source, /evaluateIncrementalSessionEligibility/);
   assert.match(source, /planIncrementalSession/);
+  assert.match(source, /incremental_processing_checkpoint/);
   assert.doesNotMatch(source, /applyExistingMatchOccurrences/);
   assert.doesNotMatch(source, /runExistingMatchOccurrenceAppend/);
   assert.doesNotMatch(source, /getDb\(/);

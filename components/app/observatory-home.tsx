@@ -10,6 +10,8 @@ import { ContextPackCard } from "@/components/app/context-pack-card";
 import { ObservationCard } from "@/components/app/observation-card";
 import { ReviewCard } from "@/components/app/review-card";
 import { SessionCard } from "@/components/app/session-card";
+import { TopicSignalPanel } from "@/components/app/topic-signal-panel";
+import type { TopicSignalPresentationModel } from "@/lib/concepts/topic-signal/presentation";
 import type { ContextPackListItem, ReviewListItem } from "@/lib/db/queries";
 import type { SessionRecord } from "@/lib/db/schema";
 import { HOME_DATA_ACTIONS } from "@/lib/observations/home";
@@ -57,6 +59,7 @@ function ObservationSection({
 
 export function ObservatoryHome({
   model,
+  topicSignals,
   week,
   weekCount,
   reviewCount,
@@ -65,6 +68,7 @@ export function ObservatoryHome({
   recentSessions,
 }: {
   model: ObservatoryHomeModel;
+  topicSignals: TopicSignalPresentationModel;
   week: { start: string; end: string };
   weekCount: number;
   reviewCount: number;
@@ -83,6 +87,8 @@ export function ObservatoryHome({
       <p className="mt-3 max-w-2xl text-sm leading-7 text-muted sm:text-base">
         複数の対話から、根拠のある変化・接続・緊張関係だけを観測します。
       </p>
+
+      <TopicSignalPanel model={topicSignals} />
 
       {model.totalCount === 0 ? (
         <div className="mt-8 rounded-2xl border border-line bg-white p-5 shadow-[0_12px_40px_-30px_rgba(15,23,42,0.45)] sm:p-6">
