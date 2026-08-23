@@ -1,0 +1,241 @@
+import { MIN_INTEGRATED_REVIEW_SESSIONS } from "@/lib/ai/limits";
+import {
+  DUAL_PIPELINE_ORCHESTRATOR_CODE_FACTS,
+  DUAL_PIPELINE_ORCHESTRATOR_PLAN_VERSION,
+  type ConceptSessionPlanRow,
+  type DualPipelineOrchestratorPlan,
+  type DualPipelineOrchestratorPlanInput,
+} from "./types";
+
+export function uniqueSortedSessionIds(ids: readonly string[]) {
+  return [...new Set(ids.map((id) => id.trim()).filter((id) => id !== ""))].sort(
+    (left, right) => left.localeCompare(right),
+  );
+}
+
+function conceptRowFromEvaluation(
+  evaluation: DualPipelineOrchestratorPlanInput["conceptEvaluations"][number],
+): ConceptSessionPlanRow {
+  if (evaluation.status === "already_covered") {
+    return {
+      sessionId: evaluation.sessionId,
+      state: "covered",
+      reason: evaluation.reason ?? "already_covered",
+    };
+  }
+  if (evaluation.status === "eligible") {
+    return {
+      sessionId: evaluation.sessionId,
+      state: "needs_processing",
+      reason: evaluation.reason ?? "not_covered",
+    };
+  }
+  return {
+    sessionId: evaluation.sessionId,
+    state: "blocked",
+    reason: evaluation.reason ?? "blocked",
+  };
+}
+
+/**
+ * Pure dual-pipeline orchestrator plan. Does not authorize LLM or DB writes.
+ * Concept coverage comes from supplied eligibility evaluations.
+ * Review coverage comes from explicit review_sessions only.
+ * Occurrence / Observation / Evidence links are not inputs.
+ */
+export function buildDualPipelineOrchestratorPlan(
+  input: DualPipelineOrchestratorPlanInput,
+): DualPipelineOrchestratorPlan {
+  const requestedSessionIds = uniqueSortedSessionIds(input.requestedSessionIds);
+  const existing = new Set(uniqueSortedSessionIds(input.existingSessionIds));
+  const invalidSessionIds = requestedSessionIds.filter(
+    (id) => !existing.has(id),
+  );
+  const validSessionIds = requestedSessionIds.filter((id) => existing.has(id));
+  const validSet = new Set(validSessionIds);
+
+  const evaluationById = new Map(
+    input.conceptEvaluations.map((evaluation) => [
+      evaluation.sessionId,
+      evaluation,
+    ]),
+  );
+  const conceptSessions: ConceptSessionPlanRow[] = validSessionIds.map(
+    (sessionId) => {
+      const evaluation = evaluationById.get(sessionId);
+      if (!evaluation) {
+        return {
+          sessionId,
+          state: "blocked",
+          reason: "eligibility_unresolved",
+        };
+      }
+      return conceptRowFromEvaluation(evaluation);
+    },
+  );
+  for (const sessionId of invalidSessionIds) {
+    conceptSessions.push({
+      sessionId,
+      state: "invalid",
+      reason: "missing_session",
+    });
+  }
+  conceptSessions.sort((left, right) =>
+    left.sessionId.localeCompare(right.sessionId),
+  );
+
+  const coveredSessionIds = conceptSessions
+    .filter((row) => row.state === "covered")
+    .map((row) => row.sessionId);
+  const needsProcessingSessionIds = conceptSessions
+    .filter((row) => row.state === "needs_processing")
+    .map((row) => row.sessionId);
+  const blockedSessionIds = conceptSessions
+    .filter((row) => row.state === "blocked")
+    .map((row) => row.sessionId);
+
+  const conceptAction = (() => {
+    if (requestedSessionIds.length === 0) {
+      return "no_selection" as const;
+    }
+    if (validSessionIds.length === 0) {
+      return "no_valid_session" as const;
+    }
+    if (blockedSessionIds.length > 0 && needsProcessingSessionIds.length === 0) {
+      return "blocked" as const;
+    }
+    if (needsProcessingSessionIds.length > 0) {
+      return "needs_processing" as const;
+    }
+    return "not_needed" as const;
+  })();
+
+  const conceptBlockingReason =
+    conceptAction === "no_selection"
+      ? "no_selection"
+      : conceptAction === "no_valid_session"
+        ? "missing_session"
+        : conceptAction === "blocked"
+          ? (conceptSessions.find((row) => row.state === "blocked")?.reason ??
+            "blocked")
+          : conceptAction === "needs_processing"
+            ? "unified_session_processor_missing"
+            : null;
+
+  const reviewCoveredSet = new Set(
+    uniqueSortedSessionIds(input.reviewCoveredSessionIds).filter((id) =>
+      validSet.has(id),
+    ),
+  );
+  const reviewCoveredSessionIds = validSessionIds.filter((id) =>
+    reviewCoveredSet.has(id),
+  );
+  const reviewUncoveredSessionIds = validSessionIds.filter(
+    (id) => !reviewCoveredSet.has(id),
+  );
+
+  const review = (() => {
+    if (requestedSessionIds.length === 0) {
+      return {
+        action: "no_selection" as const,
+        executionReady: false,
+        blockingReason: "no_selection",
+      };
+    }
+    if (validSessionIds.length === 0) {
+      return {
+        action: "no_valid_session" as const,
+        executionReady: false,
+        blockingReason: "missing_session",
+      };
+    }
+    if (validSessionIds.length < MIN_INTEGRATED_REVIEW_SESSIONS) {
+      return {
+        action: "blocked" as const,
+        executionReady: false,
+        blockingReason: "review_requires_at_least_two_sessions",
+      };
+    }
+    if (reviewUncoveredSessionIds.length === 0) {
+      return {
+        action: "not_needed" as const,
+        executionReady: false,
+        blockingReason: null,
+      };
+    }
+    return {
+      action: "run_for_selection" as const,
+      executionReady: true,
+      blockingReason: null,
+    };
+  })();
+
+  return {
+    version: DUAL_PIPELINE_ORCHESTRATOR_PLAN_VERSION,
+    authorizesExecution: false,
+    codeFacts: DUAL_PIPELINE_ORCHESTRATOR_CODE_FACTS,
+    selection: {
+      requestedSessionIds,
+      validSessionIds,
+      invalidSessionIds,
+    },
+    concept: {
+      action: conceptAction,
+      executionReady: false,
+      blockingReason: conceptBlockingReason,
+      coveredSessionIds,
+      needsProcessingSessionIds,
+      blockedSessionIds,
+      sessions: conceptSessions,
+    },
+    review: {
+      action: review.action,
+      executionReady: review.executionReady,
+      blockingReason: review.blockingReason,
+      selectedSessionIds: validSessionIds,
+      coveredSessionIds: reviewCoveredSessionIds,
+      uncoveredSessionIds: reviewUncoveredSessionIds,
+    },
+    relation: {
+      isPrimaryStage: false,
+      mode: "automatic_after_primary_commit",
+    },
+    workload: {
+      conceptExtractionCallsKnown: needsProcessingSessionIds.length,
+      conceptAssessmentCalls: "unknown_until_extraction",
+      reviewCallsKnown: review.action === "run_for_selection" ? 1 : 0,
+    },
+  };
+}
+
+export function formatDualPipelineOrchestratorPlan(
+  plan: DualPipelineOrchestratorPlan,
+) {
+  return [
+    `version: ${plan.version}`,
+    `authorizesExecution: ${plan.authorizesExecution}`,
+    `triggerPolicy: ${plan.codeFacts.triggerPolicy}`,
+    `requestedSessionIds: ${plan.selection.requestedSessionIds.join(",") || "(none)"}`,
+    `validSessionIds: ${plan.selection.validSessionIds.join(",") || "(none)"}`,
+    `invalidSessionIds: ${plan.selection.invalidSessionIds.join(",") || "(none)"}`,
+    `concept.action: ${plan.concept.action}`,
+    `concept.executionReady: ${plan.concept.executionReady}`,
+    `concept.blockingReason: ${plan.concept.blockingReason ?? "(none)"}`,
+    `concept.executionReadiness: ${plan.codeFacts.conceptExecutionReadiness}`,
+    `concept.coveredSessionIds: ${plan.concept.coveredSessionIds.join(",") || "(none)"}`,
+    `concept.needsProcessingSessionIds: ${plan.concept.needsProcessingSessionIds.join(",") || "(none)"}`,
+    `review.action: ${plan.review.action}`,
+    `review.executionReady: ${plan.review.executionReady}`,
+    `review.blockingReason: ${plan.review.blockingReason ?? "(none)"}`,
+    `review.selectedSessionIds: ${plan.review.selectedSessionIds.join(",") || "(none)"}`,
+    `review.coveredSessionIds: ${plan.review.coveredSessionIds.join(",") || "(none)"}`,
+    `review.uncoveredSessionIds: ${plan.review.uncoveredSessionIds.join(",") || "(none)"}`,
+    `relation.isPrimaryStage: ${plan.relation.isPrimaryStage}`,
+    `relation.mode: ${plan.relation.mode}`,
+    `workload.conceptExtractionCallsKnown: ${plan.workload.conceptExtractionCallsKnown}`,
+    `workload.conceptAssessmentCalls: ${plan.workload.conceptAssessmentCalls}`,
+    `workload.reviewCallsKnown: ${plan.workload.reviewCallsKnown}`,
+    `recommendedStageOrder: ${plan.codeFacts.recommendedStageOrder}`,
+    `recommendedNextStep: ${plan.codeFacts.recommendedNextStep}`,
+  ].join("\n");
+}
