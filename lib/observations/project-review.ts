@@ -1,6 +1,11 @@
 import { parseStoredReviewPayload } from "@/lib/ai/review-schemas";
 import type { ReviewRecord } from "@/lib/db/schema";
-import { insertReview } from "@/lib/db/queries";
+import { getDb } from "@/lib/db/client";
+import { getReviewById, insertReview, listSessionsByReviewId } from "@/lib/db/queries";
+import {
+  loadReviewProcessingRunByReviewId,
+  updateReviewProcessingRunPhase,
+} from "@/lib/reviews/review-run-store";
 import {
   createDbProjectStore,
   type ProjectReviewStore,
@@ -161,6 +166,102 @@ export function projectReviewToObservations(
   };
 }
 
+function observationCountFromProjection(result: ProjectReviewResult): number {
+  if (result.status === "projected") {
+    return result.inserted + result.skippedExisting;
+  }
+  return 0;
+}
+
+function safeUpdateRunPhase(
+  updateRunPhase: typeof updateReviewProcessingRunPhase,
+  input: Parameters<typeof updateReviewProcessingRunPhase>[0],
+) {
+  try {
+    updateRunPhase(input);
+  } catch {
+    // Phase is diagnostic; projection idempotency covers resume.
+  }
+}
+
+export function projectPersistedReview(input: {
+  reviewId: string;
+  db: ReturnType<typeof getDb>;
+  now?: () => string;
+  updateRunPhase?: typeof updateReviewProcessingRunPhase;
+}): {
+  ok: true;
+  projection: ProjectReviewResult;
+  observationCount: number;
+} | {
+  ok: false;
+  code: string;
+  projection: ProjectReviewResult | null;
+} {
+  const review = getReviewById(input.reviewId, input.db);
+  if (!review) {
+    return { ok: false, code: "missing_review", projection: null };
+  }
+  const sessionIds = listSessionsByReviewId(review.id, input.db).map(
+    (session) => session.id,
+  );
+  const nowFn = input.now ?? (() => new Date().toISOString());
+  const updateRunPhase = input.updateRunPhase ?? updateReviewProcessingRunPhase;
+
+  let projection: ProjectReviewResult;
+  const store = createDbProjectStore(input.db);
+  try {
+    projection = projectReviewToObservations(
+      {
+        reviewId: review.id,
+        promptVersion: review.promptVersion,
+        payload: review.payload,
+        sessionIds,
+      },
+      store,
+      nowFn,
+    );
+  } catch (error) {
+    const run = loadReviewProcessingRunByReviewId({
+      reviewId: review.id,
+      db: input.db,
+    });
+    if (run) {
+      safeUpdateRunPhase(updateRunPhase, {
+        runId: run.runId,
+        phase: "review_saved",
+        db: input.db,
+        now: nowFn,
+        lastFailureStage: "projection",
+        lastFailureCode:
+          error instanceof Error ? error.message : "projection_failed",
+      });
+    }
+    throw error;
+  }
+
+  if (projection.status === "skipped") {
+    return { ok: false, code: projection.reason, projection };
+  }
+
+  const observationCount = observationCountFromProjection(projection);
+  const run = loadReviewProcessingRunByReviewId({
+    reviewId: review.id,
+    db: input.db,
+  });
+  if (run) {
+    safeUpdateRunPhase(updateRunPhase, {
+      runId: run.runId,
+      phase: "projection_done",
+      db: input.db,
+      now: nowFn,
+      projectedObservationCount: observationCount,
+    });
+  }
+
+  return { ok: true, projection, observationCount };
+}
+
 function toInsertRow(
   observation: Observation,
   detectedAt: string,
@@ -202,20 +303,14 @@ export function projectSavedReview(
   );
 }
 
-/**
- * Review を先に確定保存し、Observation は派生データとして後から投影する。
- * 投影失敗でも Review は残す。
- */
 export function insertReviewAndProject(
   input: Parameters<typeof insertReview>[0],
 ): ReviewRecord {
   const record = insertReview(input);
   try {
-    projectReviewToObservations({
+    projectPersistedReview({
       reviewId: record.id,
-      promptVersion: record.promptVersion,
-      payload: input.payload,
-      sessionIds: input.sessionIds,
+      db: getDb(),
     });
   } catch (error) {
     console.error("observation projection failed", {

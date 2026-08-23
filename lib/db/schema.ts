@@ -96,6 +96,29 @@ export const reviewSessions = sqliteTable(
   ],
 );
 
+export const reviewProcessingRuns = sqliteTable(
+  "review_processing_runs",
+  {
+    runId: text("run_id").primaryKey(),
+    reviewId: text("review_id")
+      .notNull()
+      .references(() => reviews.id, { onDelete: "cascade" }),
+    processingVersion: text("processing_version").notNull(),
+    phase: text("phase").notNull(),
+    projectedObservationCount: integer("projected_observation_count"),
+    lastFailureStage: text("last_failure_stage"),
+    lastFailureCode: text("last_failure_code"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("review_processing_runs_review_processing_unique").on(
+      table.reviewId,
+      table.processingVersion,
+    ),
+  ],
+);
+
 export const evidences = sqliteTable("evidences", {
   id: text("id").primaryKey(),
   reviewId: text("review_id").references(() => reviews.id, {
@@ -300,11 +323,37 @@ export const conceptProcessingCheckpoints = sqliteTable(
   ],
 );
 
+export const conceptIncrementalSessionRuns = sqliteTable(
+  "concept_incremental_session_runs",
+  {
+    runId: text("run_id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    processingVersion: text("processing_version").notNull(),
+    processorVersion: text("processor_version").notNull(),
+    runVersion: text("run_version").notNull(),
+    phase: text("phase").notNull(),
+    preparedPayload: text("prepared_payload").notNull(),
+    lastFailureStage: text("last_failure_stage"),
+    lastFailureCode: text("last_failure_code"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("concept_incremental_session_runs_session_processing_unique").on(
+      table.sessionId,
+      table.processingVersion,
+    ),
+  ],
+);
+
 export type SessionRecord = typeof sessions.$inferSelect;
 export type MessageRecord = typeof messages.$inferSelect;
 export type SourceConversationRecord = typeof sourceConversations.$inferSelect;
 export type SessionAnalysisRecord = typeof sessionAnalyses.$inferSelect;
 export type ReviewRecord = typeof reviews.$inferSelect;
+export type ReviewProcessingRunRecord = typeof reviewProcessingRuns.$inferSelect;
 export type EvidenceRecord = typeof evidences.$inferSelect;
 export type ContextPackRecord = typeof contextPacks.$inferSelect;
 export type ObservationRecord = typeof observations.$inferSelect;
@@ -315,3 +364,5 @@ export type ObservationConceptEvidenceSupportRecord =
   typeof observationConceptEvidenceSupports.$inferSelect;
 export type ConceptProcessingCheckpointRecord =
   typeof conceptProcessingCheckpoints.$inferSelect;
+export type ConceptIncrementalSessionRunRecord =
+  typeof conceptIncrementalSessionRuns.$inferSelect;

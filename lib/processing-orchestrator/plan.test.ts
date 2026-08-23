@@ -39,8 +39,36 @@ function emptyInput(): DualPipelineOrchestratorPlanInput {
     requestedSessionIds: [],
     existingSessionIds: [],
     conceptEvaluations: [],
+    reviewSelectionState: {
+      exactCompletedReviewIds: [],
+      exactPendingReviewIds: [],
+      exactLegacyUnknownReviewIds: [],
+    },
     reviewCoveredSessionIds: [],
   };
+}
+
+function seedReviewRun(
+  db: ReturnType<typeof openMemoryDb>,
+  input: {
+    reviewId: string;
+    phase: "review_saved" | "projection_done";
+    projectedObservationCount?: number;
+  },
+) {
+  db.insert(schema.reviewProcessingRuns)
+    .values({
+      runId: `run-${input.reviewId}`,
+      reviewId: input.reviewId,
+      processingVersion: "integrated-review-processing-v1",
+      phase: input.phase,
+      projectedObservationCount: input.projectedObservationCount ?? null,
+      lastFailureStage: null,
+      lastFailureCode: null,
+      createdAt: "2026-08-18T00:00:00.000Z",
+      updatedAt: "2026-08-18T00:00:00.000Z",
+    })
+    .run();
 }
 
 function openMemoryDb() {
@@ -218,11 +246,8 @@ test("F. Concept uncovered needs_processing", () => {
   });
   assert.deepEqual(plan.concept.needsProcessingSessionIds, ["s-a"]);
   assert.equal(plan.concept.action, "needs_processing");
-  assert.equal(plan.concept.executionReady, false);
-  assert.equal(
-    plan.concept.blockingReason,
-    "unified_session_processor_missing",
-  );
+  assert.equal(plan.concept.executionReady, true);
+  assert.equal(plan.concept.blockingReason, null);
 });
 
 test("G. ConceptOccurrence alone is not Concept covered", () => {
@@ -263,7 +288,7 @@ test("G. ConceptOccurrence alone is not Concept covered", () => {
   assert.equal(plan.concept.coveredSessionIds.length, 0);
 });
 
-test("H. Review covered comes from review_sessions", () => {
+test("H. legacy exact-selection Review blocks with completion unknown", () => {
   const db = openMemoryDb();
   seedSession(db, "s-a", "2026-08-01");
   seedSession(db, "s-b", "2026-08-02");
@@ -280,8 +305,9 @@ test("H. Review covered comes from review_sessions", () => {
     initialCoverage: coverageFor([]),
   });
   assert.deepEqual(plan.review.coveredSessionIds, ["s-a", "s-b"]);
-  assert.equal(plan.review.action, "not_needed");
-  assert.equal(plan.review.executionReady, false);
+  assert.equal(plan.review.action, "blocked");
+  assert.equal(plan.review.blockingReason, "legacy_review_completion_unknown");
+  assert.deepEqual(plan.review.exactLegacyUnknownReviewIds, ["r-1"]);
 });
 
 test("I. Observation link alone is not Review covered", () => {
@@ -353,7 +379,7 @@ test("K. Review selection of 2 uncovered Sessions is run_for_selection", () => {
   });
   assert.equal(plan.review.action, "run_for_selection");
   assert.equal(plan.review.executionReady, true);
-  assert.deepEqual(plan.review.selectedSessionIds, ["s-a", "s-b"]);
+  assert.deepEqual(plan.review.selectionSessionIds, ["s-a", "s-b"]);
   assert.equal(plan.workload.reviewCallsKnown, 1);
   assert.equal(plan.workload.conceptExtractionCallsKnown, 2);
   assert.equal(plan.workload.conceptAssessmentCalls, "unknown_until_extraction");
@@ -370,13 +396,13 @@ test("L. mixed Review coverage does not shrink selection", () => {
     ],
     reviewCoveredSessionIds: ["s-a"],
   });
-  assert.deepEqual(plan.review.selectedSessionIds, ["s-a", "s-b"]);
+  assert.deepEqual(plan.review.selectionSessionIds, ["s-a", "s-b"]);
   assert.deepEqual(plan.review.coveredSessionIds, ["s-a"]);
   assert.deepEqual(plan.review.uncoveredSessionIds, ["s-b"]);
   assert.equal(plan.review.action, "run_for_selection");
 });
 
-test("M. all Review-covered Sessions are not_needed for coverage fill", () => {
+test("M. exact completed Review makes selection not_needed", () => {
   const plan = buildDualPipelineOrchestratorPlan({
     ...emptyInput(),
     requestedSessionIds: ["s-a", "s-b"],
@@ -393,11 +419,17 @@ test("M. all Review-covered Sessions are not_needed for coverage fill", () => {
         reason: "initial_processing_coverage",
       },
     ],
+    reviewSelectionState: {
+      exactCompletedReviewIds: ["r-done"],
+      exactPendingReviewIds: [],
+      exactLegacyUnknownReviewIds: [],
+    },
     reviewCoveredSessionIds: ["s-a", "s-b"],
   });
   assert.equal(plan.review.action, "not_needed");
   assert.equal(plan.concept.action, "not_needed");
   assert.equal(plan.review.executionReady, false);
+  assert.equal(plan.workload.reviewCallsKnown, 0);
 });
 
 test("N. invalid + valid mix keeps stage status distinct", () => {
@@ -431,7 +463,7 @@ test("O. Relation is not a primary stage", () => {
   assert.equal(plan.codeFacts.relationIsPrimaryStage, false);
 });
 
-test("P. Concept execution readiness is composable_but_not_wired", () => {
+test("P. Concept execution readiness is unified_session_processor_ready", () => {
   const plan = buildDualPipelineOrchestratorPlan({
     ...emptyInput(),
     requestedSessionIds: ["s-a"],
@@ -442,12 +474,12 @@ test("P. Concept execution readiness is composable_but_not_wired", () => {
   });
   assert.equal(
     plan.codeFacts.conceptExecutionReadiness,
-    "composable_but_not_wired",
+    "unified_session_processor_ready",
   );
-  assert.equal(plan.codeFacts.conceptUnifiedSessionProcessor, false);
+  assert.equal(plan.codeFacts.conceptUnifiedSessionProcessor, true);
   assert.equal(plan.codeFacts.conceptExistingAppendWritesCheckpoint, false);
   assert.equal(plan.codeFacts.conceptNewAdmissionDedicatedCli, false);
-  assert.equal(plan.concept.executionReady, false);
+  assert.equal(plan.concept.executionReady, true);
 });
 
 test("Q. Review execution readiness uses existing production entry", () => {
@@ -601,6 +633,119 @@ test("loader reuses eligibility: initial coverage and checkpoint", () => {
   assert.deepEqual(plan.concept.needsProcessingSessionIds, ["s-open"]);
 });
 
+test("exact selection A: projection_done Review -> not_needed", () => {
+  const db = openMemoryDb();
+  seedSession(db, "s-a");
+  seedSession(db, "s-b");
+  seedReview(db, "r-done");
+  db.insert(schema.reviewSessions)
+    .values([
+      { reviewId: "r-done", sessionId: "s-a" },
+      { reviewId: "r-done", sessionId: "s-b" },
+    ])
+    .run();
+  seedReviewRun(db, { reviewId: "r-done", phase: "projection_done", projectedObservationCount: 0 });
+  const plan = loadDualPipelineOrchestratorPlan({
+    db,
+    sessionIds: ["s-b", "s-a"],
+    initialCoverage: coverageFor([]),
+  });
+  assert.equal(plan.review.action, "not_needed");
+  assert.deepEqual(plan.review.exactCompletedReviewIds, ["r-done"]);
+});
+
+test("exact selection B: per-session union does not imply not_needed", () => {
+  const db = openMemoryDb();
+  seedSession(db, "s-a");
+  seedSession(db, "s-b");
+  seedSession(db, "s-c");
+  seedSession(db, "s-d");
+  seedReview(db, "r-13");
+  seedReview(db, "r-24");
+  db.insert(schema.reviewSessions)
+    .values([
+      { reviewId: "r-13", sessionId: "s-a" },
+      { reviewId: "r-13", sessionId: "s-c" },
+      { reviewId: "r-24", sessionId: "s-b" },
+      { reviewId: "r-24", sessionId: "s-d" },
+    ])
+    .run();
+  seedReviewRun(db, { reviewId: "r-13", phase: "projection_done" });
+  seedReviewRun(db, { reviewId: "r-24", phase: "projection_done" });
+  const plan = loadDualPipelineOrchestratorPlan({
+    db,
+    sessionIds: ["s-a", "s-b"],
+    initialCoverage: coverageFor([]),
+  });
+  assert.equal(plan.review.action, "run_for_selection");
+  assert.deepEqual(plan.review.exactCompletedReviewIds, []);
+});
+
+test("exact selection C: superset Review is not exact match", () => {
+  const db = openMemoryDb();
+  seedSession(db, "s-a");
+  seedSession(db, "s-b");
+  seedSession(db, "s-c");
+  seedReview(db, "r-abc");
+  db.insert(schema.reviewSessions)
+    .values([
+      { reviewId: "r-abc", sessionId: "s-a" },
+      { reviewId: "r-abc", sessionId: "s-b" },
+      { reviewId: "r-abc", sessionId: "s-c" },
+    ])
+    .run();
+  seedReviewRun(db, { reviewId: "r-abc", phase: "projection_done" });
+  const plan = loadDualPipelineOrchestratorPlan({
+    db,
+    sessionIds: ["s-a", "s-b"],
+    initialCoverage: coverageFor([]),
+  });
+  assert.equal(plan.review.action, "run_for_selection");
+});
+
+test("exact selection D: pending exact Review -> resume_projection", () => {
+  const db = openMemoryDb();
+  seedSession(db, "s-a");
+  seedSession(db, "s-b");
+  seedReview(db, "r-pending");
+  db.insert(schema.reviewSessions)
+    .values([
+      { reviewId: "r-pending", sessionId: "s-a" },
+      { reviewId: "r-pending", sessionId: "s-b" },
+    ])
+    .run();
+  seedReviewRun(db, { reviewId: "r-pending", phase: "review_saved" });
+  const plan = loadDualPipelineOrchestratorPlan({
+    db,
+    sessionIds: ["s-a", "s-b"],
+    initialCoverage: coverageFor([]),
+  });
+  assert.equal(plan.review.action, "resume_projection");
+  assert.equal(plan.review.executionReady, true);
+  assert.equal(plan.workload.reviewCallsKnown, 0);
+  assert.deepEqual(plan.review.exactPendingReviewIds, ["r-pending"]);
+});
+
+test("exact selection F: multiple pending exact Reviews -> blocked", () => {
+  const plan = buildDualPipelineOrchestratorPlan({
+    ...emptyInput(),
+    requestedSessionIds: ["s-a", "s-b"],
+    existingSessionIds: ["s-a", "s-b"],
+    conceptEvaluations: [
+      { sessionId: "s-a", status: "eligible", reason: "not_covered" },
+      { sessionId: "s-b", status: "eligible", reason: "not_covered" },
+    ],
+    reviewSelectionState: {
+      exactCompletedReviewIds: [],
+      exactPendingReviewIds: ["r-1", "r-2"],
+      exactLegacyUnknownReviewIds: [],
+    },
+    reviewCoveredSessionIds: ["s-a", "s-b"],
+  });
+  assert.equal(plan.review.action, "blocked");
+  assert.equal(plan.review.blockingReason, "ambiguous_pending_reviews");
+});
+
 test("CLI requires --session and rejects --apply", () => {
   assert.equal(parseDualPipelineOrchestratorPlanArgs([]).ok, false);
   const apply = parseDualPipelineOrchestratorPlanArgs([
@@ -644,10 +789,10 @@ test("candidate coverage helper matches eligibility loader", () => {
   assert.equal(coverage.ok, true);
 });
 
-test("code facts recommend unified Concept session processor", () => {
+test("code facts recommend explicit dual-pipeline orchestrator executor", () => {
   assert.equal(
     DUAL_PIPELINE_ORCHESTRATOR_CODE_FACTS.recommendedNextStep,
-    "unified_incremental_concept_session_processor",
+    "explicit_dual_pipeline_orchestrator_executor",
   );
   assert.equal(
     DUAL_PIPELINE_ORCHESTRATOR_CODE_FACTS.recommendedStageOrder,

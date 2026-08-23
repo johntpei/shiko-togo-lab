@@ -4,24 +4,24 @@ export const DUAL_PIPELINE_ORCHESTRATOR_PLAN_VERSION =
 export type DualPipelineOrchestratorPlanVersion =
   typeof DUAL_PIPELINE_ORCHESTRATOR_PLAN_VERSION;
 
-export const CONCEPT_EXECUTION_READINESS = "composable_but_not_wired" as const;
+export const CONCEPT_EXECUTION_READINESS = "unified_session_processor_ready" as const;
 
 export const REVIEW_PRODUCTION_ENTRY = "createIntegratedReviewAction" as const;
 
 export const RECOMMENDED_NEXT_STEP =
-  "unified_incremental_concept_session_processor" as const;
+  "explicit_dual_pipeline_orchestrator_executor" as const;
 
 /**
  * Code-path facts. Not inferred from Session counts.
- * Concept stages exist as libraries / CLIs but are not one production
- * Session processor that writes a completion checkpoint.
+ * Concept Incremental Session processor is wired as a library.
+ * Orchestrator plan still does not authorize execution.
  * Integrated Review already has a production UI/server entry.
  * Relation materialization is post-commit, not a primary stage.
  */
 export const DUAL_PIPELINE_ORCHESTRATOR_CODE_FACTS = {
   triggerPolicy: "explicit_session_selection",
   authorizesExecution: false,
-  conceptUnifiedSessionProcessor: false,
+  conceptUnifiedSessionProcessor: true,
   conceptExistingAppendCli: "cli_concept_incremental_existing_append",
   conceptExistingAppendWritesCheckpoint: false,
   conceptNewAdmissionDedicatedCli: false,
@@ -32,6 +32,7 @@ export const DUAL_PIPELINE_ORCHESTRATOR_CODE_FACTS = {
   reviewProductionEntry: REVIEW_PRODUCTION_ENTRY,
   reviewRepeatCreatesNewRow: true,
   reviewDedupesBySessionSet: false,
+  reviewExactSelectionCompletion: true,
   sessionAnalysesRequiredForReview: false,
   relationIsPrimaryStage: false,
   relationMode: "automatic_after_primary_commit",
@@ -66,7 +67,14 @@ export type ReviewStageAction =
   | "no_valid_session"
   | "blocked"
   | "not_needed"
-  | "run_for_selection";
+  | "run_for_selection"
+  | "resume_projection";
+
+export type ReviewSelectionState = {
+  exactCompletedReviewIds: string[];
+  exactPendingReviewIds: string[];
+  exactLegacyUnknownReviewIds: string[];
+};
 
 export type ConceptEvaluation = {
   sessionId: string;
@@ -78,6 +86,7 @@ export type DualPipelineOrchestratorPlanInput = {
   requestedSessionIds: string[];
   existingSessionIds: string[];
   conceptEvaluations: ConceptEvaluation[];
+  reviewSelectionState: ReviewSelectionState;
   reviewCoveredSessionIds: string[];
 };
 
@@ -92,7 +101,7 @@ export type DualPipelineOrchestratorPlan = {
   };
   concept: {
     action: ConceptStageAction;
-    executionReady: false;
+    executionReady: boolean;
     blockingReason: string | null;
     coveredSessionIds: string[];
     needsProcessingSessionIds: string[];
@@ -103,7 +112,10 @@ export type DualPipelineOrchestratorPlan = {
     action: ReviewStageAction;
     executionReady: boolean;
     blockingReason: string | null;
-    selectedSessionIds: string[];
+    selectionSessionIds: string[];
+    exactCompletedReviewIds: string[];
+    exactPendingReviewIds: string[];
+    exactLegacyUnknownReviewIds: string[];
     coveredSessionIds: string[];
     uncoveredSessionIds: string[];
   };

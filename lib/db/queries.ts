@@ -6,6 +6,7 @@ import {
   type ParsedMessage,
 } from "@/lib/ingest/parse-transcript";
 import { getDb } from "./client";
+import { insertReviewProcessingRunInTransaction } from "@/lib/reviews/review-run-store";
 import type { StoredAnalysisPayload } from "@/lib/ai/schemas";
 import type { StoredReviewPayload } from "@/lib/ai/review-schemas";
 import type { StoredContextPackPayload } from "@/lib/context-pack/schema";
@@ -273,19 +274,22 @@ export function listSessionsByIds(ids: string[]) {
   });
 }
 
-export function insertReview(input: {
-  title: string;
-  model: string;
-  promptVersion: string;
-  payload: StoredReviewPayload;
-  sessionIds: string[];
-  evidences: Array<{
-    sessionId: string;
-    messageId: string;
-    quote: string;
-    validated: boolean;
-  }>;
-}): ReviewRecord {
+export function insertReview(
+  input: {
+    title: string;
+    model: string;
+    promptVersion: string;
+    payload: StoredReviewPayload;
+    sessionIds: string[];
+    evidences: Array<{
+      sessionId: string;
+      messageId: string;
+      quote: string;
+      validated: boolean;
+    }>;
+  },
+  db: ReturnType<typeof getDb> = getDb(),
+): ReviewRecord {
   const now = new Date().toISOString();
   const record: ReviewRecord = {
     id: crypto.randomUUID(),
@@ -296,7 +300,7 @@ export function insertReview(input: {
     createdAt: now,
   };
 
-  getDb().transaction((tx) => {
+  db.transaction((tx) => {
     tx.insert(reviews).values(record).run();
     if (input.sessionIds.length > 0) {
       tx.insert(reviewSessions)
@@ -324,6 +328,10 @@ export function insertReview(input: {
         )
         .run();
     }
+    insertReviewProcessingRunInTransaction(tx, {
+      reviewId: record.id,
+      now,
+    });
   });
 
   return record;
@@ -360,12 +368,15 @@ export function listReviewsWithSessionCount(): ReviewListItem[] {
   }));
 }
 
-export function getReviewById(id: string) {
-  return getDb().select().from(reviews).where(eq(reviews.id, id)).get() ?? null;
+export function getReviewById(id: string, db: ReturnType<typeof getDb> = getDb()) {
+  return db.select().from(reviews).where(eq(reviews.id, id)).get() ?? null;
 }
 
-export function listSessionsByReviewId(reviewId: string) {
-  return getDb()
+export function listSessionsByReviewId(
+  reviewId: string,
+  db: ReturnType<typeof getDb> = getDb(),
+) {
+  return db
     .select({ session: sessions })
     .from(reviewSessions)
     .innerJoin(sessions, eq(sessions.id, reviewSessions.sessionId))

@@ -11,7 +11,11 @@ import {
   type InitialConceptProcessingCoverageLoad,
 } from "@/lib/concepts/incremental/eligibility";
 import type { ConceptQueryDb } from "@/lib/db/concept-queries";
-import { reviewSessions, sessions } from "@/lib/db/schema";
+import { sessions } from "@/lib/db/schema";
+import {
+  classifyExactReviewSelectionState,
+  listReviewCoveredSessionIds,
+} from "@/lib/reviews/review-selection-state";
 import {
   buildDualPipelineOrchestratorPlan,
   uniqueSortedSessionIds,
@@ -53,6 +57,11 @@ export function loadDualPipelineOrchestratorPlan(input: {
       requestedSessionIds: [],
       existingSessionIds: [],
       conceptEvaluations: [],
+      reviewSelectionState: {
+        exactCompletedReviewIds: [],
+        exactPendingReviewIds: [],
+        exactLegacyUnknownReviewIds: [],
+      },
       reviewCoveredSessionIds: [],
     });
     return { ...plan, initialCoverageStatus: coverageStatus(input.initialCoverage) };
@@ -94,20 +103,20 @@ export function loadDualPipelineOrchestratorPlan(input: {
     };
   });
 
-  const reviewCoveredSessionIds =
-    validSessionIds.length === 0
-      ? []
-      : input.db
-          .select({ sessionId: reviewSessions.sessionId })
-          .from(reviewSessions)
-          .where(inArray(reviewSessions.sessionId, validSessionIds))
-          .all()
-          .map((row) => row.sessionId);
+  const reviewCoveredSessionIds = listReviewCoveredSessionIds(
+    input.db,
+    validSessionIds,
+  );
+  const reviewSelectionState = classifyExactReviewSelectionState(
+    input.db,
+    validSessionIds,
+  );
 
   const plan = buildDualPipelineOrchestratorPlan({
     requestedSessionIds,
     existingSessionIds,
     conceptEvaluations,
+    reviewSelectionState,
     reviewCoveredSessionIds,
   });
 

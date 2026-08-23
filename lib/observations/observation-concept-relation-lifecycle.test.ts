@@ -712,6 +712,10 @@ test("Y/wiring. production hooks live outside core apply/projection transactions
     resolve(process.cwd(), "lib/ai/tasks/integrated-review.ts"),
     "utf8",
   );
+  const reviewProcessor = readFileSync(
+    resolve(process.cwd(), "lib/reviews/integrated-review-processor.ts"),
+    "utf8",
+  );
   const applyRun = readFileSync(
     resolve(process.cwd(), "lib/concepts/admission/apply-run.ts"),
     "utf8",
@@ -724,7 +728,8 @@ test("Y/wiring. production hooks live outside core apply/projection transactions
     resolve(process.cwd(), "lib/concepts/incremental/new-admission-lifecycle.ts"),
     "utf8",
   );
-  assert.match(review, /afterReviewObservationsCommitted/);
+  assert.match(reviewProcessor, /afterReviewObservationsCommitted/);
+  assert.match(review, /createIntegratedReviewWithRecovery/);
   assert.match(applyRun, /afterConceptOccurrenceSessionsCommitted/);
   assert.match(existingAppend, /afterConceptOccurrenceSessionsCommitted/);
   assert.match(newLifecycle, /applyIncrementalNewAdmissionManifestThenReconcile/);

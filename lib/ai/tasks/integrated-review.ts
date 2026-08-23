@@ -19,7 +19,6 @@ import {
   buildIntegratedReviewUserPromptV5,
 } from "../prompts/integrated-review";
 import type { AiProvider } from "../provider";
-import { getAiProvider } from "../provider";
 import {
   buildIntegratedReviewInput,
   type ReviewSessionSource,
@@ -465,39 +464,8 @@ export async function createIntegratedReview(
     reconcile?: ObservationConceptRelationReconcileFn;
   },
 ): Promise<IntegratedReviewResult> {
-  const { insertReviewAndProject } = await import(
-    "@/lib/observations/project-review"
+  const { createIntegratedReviewWithRecovery } = await import(
+    "@/lib/reviews/integrated-review-processor"
   );
-  const { afterReviewObservationsCommitted } = await import(
-    "@/lib/observations/observation-concept-relation-lifecycle"
-  );
-  const { getDb } = await import("@/lib/db/client");
-  try {
-    const provider = getAiProvider();
-    const saved = await runIntegratedReview(sources, title, {
-      generateStructured: (request) => provider.generateStructured(request),
-      save: insertReviewAndProject,
-    });
-    if (!saved.ok) {
-      return saved;
-    }
-    const relationReconciliation = afterReviewObservationsCommitted(
-      { reviewId: saved.reviewId },
-      {
-        db: lifecycle?.db ?? getDb(),
-        reconcile: lifecycle?.reconcile,
-      },
-    );
-    return { ...saved, relationReconciliation };
-  } catch (error) {
-    if (error instanceof AnalyzeSessionError) {
-      return { ok: false, code: error.code, error: error.message };
-    }
-    console.error("integrated-review failed");
-    return {
-      ok: false,
-      code: "api",
-      error: "統合レビューに失敗しました。Sessionの原文は変更していません。",
-    };
-  }
+  return createIntegratedReviewWithRecovery(sources, title, lifecycle);
 }

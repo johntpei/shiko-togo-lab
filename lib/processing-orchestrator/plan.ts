@@ -119,7 +119,7 @@ export function buildDualPipelineOrchestratorPlan(
           ? (conceptSessions.find((row) => row.state === "blocked")?.reason ??
             "blocked")
           : conceptAction === "needs_processing"
-            ? "unified_session_processor_missing"
+            ? null
             : null;
 
   const reviewCoveredSet = new Set(
@@ -133,6 +133,17 @@ export function buildDualPipelineOrchestratorPlan(
   const reviewUncoveredSessionIds = validSessionIds.filter(
     (id) => !reviewCoveredSet.has(id),
   );
+
+  const selectionState = input.reviewSelectionState;
+  const exactCompletedReviewIds = [
+    ...selectionState.exactCompletedReviewIds,
+  ].sort((left, right) => left.localeCompare(right));
+  const exactPendingReviewIds = [...selectionState.exactPendingReviewIds].sort(
+    (left, right) => left.localeCompare(right),
+  );
+  const exactLegacyUnknownReviewIds = [
+    ...selectionState.exactLegacyUnknownReviewIds,
+  ].sort((left, right) => left.localeCompare(right));
 
   const review = (() => {
     if (requestedSessionIds.length === 0) {
@@ -156,11 +167,32 @@ export function buildDualPipelineOrchestratorPlan(
         blockingReason: "review_requires_at_least_two_sessions",
       };
     }
-    if (reviewUncoveredSessionIds.length === 0) {
+    if (exactCompletedReviewIds.length > 0) {
       return {
         action: "not_needed" as const,
         executionReady: false,
         blockingReason: null,
+      };
+    }
+    if (exactPendingReviewIds.length > 1) {
+      return {
+        action: "blocked" as const,
+        executionReady: false,
+        blockingReason: "ambiguous_pending_reviews",
+      };
+    }
+    if (exactPendingReviewIds.length === 1) {
+      return {
+        action: "resume_projection" as const,
+        executionReady: true,
+        blockingReason: null,
+      };
+    }
+    if (exactLegacyUnknownReviewIds.length > 0) {
+      return {
+        action: "blocked" as const,
+        executionReady: false,
+        blockingReason: "legacy_review_completion_unknown",
       };
     }
     return {
@@ -181,7 +213,7 @@ export function buildDualPipelineOrchestratorPlan(
     },
     concept: {
       action: conceptAction,
-      executionReady: false,
+      executionReady: conceptAction === "needs_processing",
       blockingReason: conceptBlockingReason,
       coveredSessionIds,
       needsProcessingSessionIds,
@@ -192,7 +224,10 @@ export function buildDualPipelineOrchestratorPlan(
       action: review.action,
       executionReady: review.executionReady,
       blockingReason: review.blockingReason,
-      selectedSessionIds: validSessionIds,
+      selectionSessionIds: validSessionIds,
+      exactCompletedReviewIds,
+      exactPendingReviewIds,
+      exactLegacyUnknownReviewIds,
       coveredSessionIds: reviewCoveredSessionIds,
       uncoveredSessionIds: reviewUncoveredSessionIds,
     },
@@ -203,7 +238,12 @@ export function buildDualPipelineOrchestratorPlan(
     workload: {
       conceptExtractionCallsKnown: needsProcessingSessionIds.length,
       conceptAssessmentCalls: "unknown_until_extraction",
-      reviewCallsKnown: review.action === "run_for_selection" ? 1 : 0,
+      reviewCallsKnown:
+        review.action === "run_for_selection"
+          ? 1
+          : review.action === "resume_projection"
+            ? 0
+            : 0,
     },
   };
 }
@@ -227,7 +267,10 @@ export function formatDualPipelineOrchestratorPlan(
     `review.action: ${plan.review.action}`,
     `review.executionReady: ${plan.review.executionReady}`,
     `review.blockingReason: ${plan.review.blockingReason ?? "(none)"}`,
-    `review.selectedSessionIds: ${plan.review.selectedSessionIds.join(",") || "(none)"}`,
+    `review.selectedSessionIds: ${plan.review.selectionSessionIds.join(",") || "(none)"}`,
+    `review.exactCompletedReviewIds: ${plan.review.exactCompletedReviewIds.join(",") || "(none)"}`,
+    `review.exactPendingReviewIds: ${plan.review.exactPendingReviewIds.join(",") || "(none)"}`,
+    `review.exactLegacyUnknownReviewIds: ${plan.review.exactLegacyUnknownReviewIds.join(",") || "(none)"}`,
     `review.coveredSessionIds: ${plan.review.coveredSessionIds.join(",") || "(none)"}`,
     `review.uncoveredSessionIds: ${plan.review.uncoveredSessionIds.join(",") || "(none)"}`,
     `relation.isPrimaryStage: ${plan.relation.isPrimaryStage}`,

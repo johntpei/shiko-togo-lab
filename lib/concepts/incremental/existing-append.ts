@@ -21,7 +21,7 @@ import {
   loadExistingMatchAppendIntent,
   type ExistingMatchAppendIntent,
 } from "./append-intent";
-import { applyExistingMatchOccurrences } from "./append";
+import { applyExistingMatchOccurrencesThenReconcile } from "./existing-append-lifecycle";
 import {
   evaluateIncrementalSessionEligibility,
   loadInitialConceptProcessingCoverage,
@@ -701,7 +701,11 @@ export async function runConceptIncrementalExistingAppend(
   }
 
   deps.afterPreflight?.(db);
-  const applied = applyExistingMatchOccurrences(plans, { db });
+  const lifecycle = applyExistingMatchOccurrencesThenReconcile(plans, {
+    db,
+    reconcile: deps.reconcileRelations,
+  });
+  const applied = lifecycle.primary;
   const afterApply = snapshotDbCounts(db);
 
   if (!applied.ok) {
@@ -751,10 +755,7 @@ export async function runConceptIncrementalExistingAppend(
     conflicts: 0,
     postWriteVerified,
     postWriteErrors: extraVerify,
-    relationReconciliation: afterConceptOccurrenceSessionsCommitted(
-      { sessionIds: plans.map((plan) => plan.provenance.sessionId) },
-      { db, reconcile: deps.reconcileRelations },
-    ),
+    relationReconciliation: lifecycle.relationReconciliation,
     db: { before, after },
     preflight: {
       status: preflight.status,
