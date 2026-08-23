@@ -33,6 +33,11 @@ import {
 } from "./preflight";
 import type { ExistingMatchPlan } from "./plan";
 import { findExistingMatchOccurrenceByIdentity } from "./validate";
+import {
+  afterConceptOccurrenceSessionsCommitted,
+  type ObservationConceptRelationLifecycleResult,
+  type ObservationConceptRelationReconcileFn,
+} from "@/lib/observations/observation-concept-relation-lifecycle";
 
 export const CONCEPT_INCREMENTAL_EXISTING_APPEND_DEFAULT_RESULT =
   "data/concept-incremental-existing-append-result-v1.json";
@@ -126,6 +131,7 @@ export type ExistingMatchAppendResult = {
   generateStructuredCalls: 0;
   sessionPlanning: 0;
   assessment: 0;
+  relationReconciliation?: ObservationConceptRelationLifecycleResult;
 };
 
 export type ExistingMatchAppendDeps = {
@@ -135,6 +141,7 @@ export type ExistingMatchAppendDeps = {
   writeResult?: (path: string, payload: ExistingMatchAppendResult) => void;
   afterPreflight?: (db: ConceptQueryDb) => void;
   now?: () => string;
+  reconcileRelations?: ObservationConceptRelationReconcileFn;
 };
 
 function emptyCounts(): ExistingMatchAppendDbCounts {
@@ -438,6 +445,7 @@ export async function runConceptIncrementalExistingAppend(
     generateStructuredCalls: 0,
     sessionPlanning: 0,
     assessment: 0,
+    relationReconciliation: input.relationReconciliation,
   });
 
   let intentText: string;
@@ -676,6 +684,10 @@ export async function runConceptIncrementalExistingAppend(
         classification: REAL_EXISTING_MATCH_ALREADY_PRESENT,
         alreadyPresent: preflight.alreadyPresent,
         postWriteVerified: true,
+        relationReconciliation: afterConceptOccurrenceSessionsCommitted(
+          { sessionIds: plans.map((plan) => plan.provenance.sessionId) },
+          { db, reconcile: deps.reconcileRelations },
+        ),
         db: { before, after },
         preflight: {
           status: preflight.status,
@@ -739,6 +751,10 @@ export async function runConceptIncrementalExistingAppend(
     conflicts: 0,
     postWriteVerified,
     postWriteErrors: extraVerify,
+    relationReconciliation: afterConceptOccurrenceSessionsCommitted(
+      { sessionIds: plans.map((plan) => plan.provenance.sessionId) },
+      { db, reconcile: deps.reconcileRelations },
+    ),
     db: { before, after },
     preflight: {
       status: preflight.status,

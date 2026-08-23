@@ -52,9 +52,18 @@ import {
 } from "../review-semantic";
 import { computeSemanticStats } from "../semantic-support";
 import type { ValidatedEvidence } from "../evidence";
+import type { ObservationConceptSupportDb } from "@/lib/db/observation-concept-support-queries";
+import type {
+  ObservationConceptRelationLifecycleResult,
+  ObservationConceptRelationReconcileFn,
+} from "@/lib/observations/observation-concept-relation-lifecycle";
 
 export type IntegratedReviewResult =
-  | { ok: true; reviewId: string }
+  | {
+      ok: true;
+      reviewId: string;
+      relationReconciliation?: ObservationConceptRelationLifecycleResult;
+    }
   | { ok: false; error: string; code: string };
 
 export type IntegratedReviewSaveInput = {
@@ -451,16 +460,35 @@ export async function runIntegratedReview(
 export async function createIntegratedReview(
   sources: ReviewSessionSource[],
   title: string,
+  lifecycle?: {
+    db?: ObservationConceptSupportDb;
+    reconcile?: ObservationConceptRelationReconcileFn;
+  },
 ): Promise<IntegratedReviewResult> {
   const { insertReviewAndProject } = await import(
     "@/lib/observations/project-review"
   );
+  const { afterReviewObservationsCommitted } = await import(
+    "@/lib/observations/observation-concept-relation-lifecycle"
+  );
+  const { getDb } = await import("@/lib/db/client");
   try {
     const provider = getAiProvider();
-    return await runIntegratedReview(sources, title, {
+    const saved = await runIntegratedReview(sources, title, {
       generateStructured: (request) => provider.generateStructured(request),
       save: insertReviewAndProject,
     });
+    if (!saved.ok) {
+      return saved;
+    }
+    const relationReconciliation = afterReviewObservationsCommitted(
+      { reviewId: saved.reviewId },
+      {
+        db: lifecycle?.db ?? getDb(),
+        reconcile: lifecycle?.reconcile,
+      },
+    );
+    return { ...saved, relationReconciliation };
   } catch (error) {
     if (error instanceof AnalyzeSessionError) {
       return { ok: false, code: error.code, error: error.message };

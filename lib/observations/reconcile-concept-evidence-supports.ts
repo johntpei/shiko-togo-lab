@@ -11,6 +11,7 @@ import {
   listObservationsForSessions,
   observationConceptSupportIdentitySet,
   type ObservationConceptSupportDb,
+  type ObservationConceptSupportExecutor,
 } from "@/lib/db/observation-concept-support-queries";
 
 export type ReconcileObservationConceptEvidenceSupportsInput = {
@@ -40,11 +41,73 @@ function supportIdentity(row: ObservationConceptEvidenceSupport) {
   ].join("\0");
 }
 
+export type ObservationConceptEvidenceSupportPlan = {
+  sessionsChecked: string[];
+  desired: ObservationConceptEvidenceSupport[];
+  existingCount: number;
+  missing: ObservationConceptEvidenceSupport[];
+  uniqueObservationConceptPairs: number;
+};
+
+function normalizeSessionIds(sessionIds: string[]) {
+  return [...new Set(sessionIds.filter(Boolean))].sort((left, right) =>
+    left.localeCompare(right),
+  );
+}
+
+/**
+ * Read-only desired/current support plan. Does not write.
+ * Used by post-commit reconciliation and CLI preview.
+ */
+export function planObservationConceptEvidenceSupports(
+  sessionIds: string[],
+  db: ObservationConceptSupportExecutor,
+): ObservationConceptEvidenceSupportPlan {
+  const sessionsChecked = normalizeSessionIds(sessionIds);
+  if (sessionsChecked.length === 0) {
+    return {
+      sessionsChecked,
+      desired: [],
+      existingCount: 0,
+      missing: [],
+      uniqueObservationConceptPairs: 0,
+    };
+  }
+  const observations = listObservationsForSessions(sessionsChecked, db);
+  const conceptOccurrences = listConceptOccurrencesForSessions(
+    sessionsChecked,
+    db,
+  );
+  const desired = buildObservationConceptEvidenceSupports({
+    observations,
+    conceptOccurrences,
+  }).filter((row) => sessionsChecked.includes(row.sessionId));
+  const existing = listObservationConceptEvidenceSupportsForSessions(
+    sessionsChecked,
+    db,
+  );
+  const existingKeys = observationConceptSupportIdentitySet(existing);
+  const missing = desired.filter(
+    (row) => !existingKeys.has(supportIdentity(row)),
+  );
+  return {
+    sessionsChecked,
+    desired,
+    existingCount: existing.length,
+    missing,
+    uniqueObservationConceptPairs:
+      toObservationConceptRelationPairs(desired).length,
+  };
+}
+
 /**
  * Session-scoped additive reconciliation.
  * Inserts missing exact-evidence supports. Does not delete.
  * Observation payload and ConceptOccurrence rows are insert-only in current MVP,
  * so desired-only inserts are the safe durable semantics.
+ *
+ * This table is a derived materialization of Observation payload anchors and
+ * ConceptOccurrence rows. It is not source of truth.
  */
 export function reconcileObservationConceptEvidenceSupports(
   input: ReconcileObservationConceptEvidenceSupportsInput,
@@ -53,9 +116,7 @@ export function reconcileObservationConceptEvidenceSupports(
     now?: () => string;
   },
 ): ReconcileObservationConceptEvidenceSupportsResult {
-  const sessionsChecked = [...new Set(input.sessionIds.filter(Boolean))].sort(
-    (left, right) => left.localeCompare(right),
-  );
+  const sessionsChecked = normalizeSessionIds(input.sessionIds);
   const empty: ReconcileObservationConceptEvidenceSupportsResult = {
     status: "reconciled",
     relationVersion: OBSERVATION_CONCEPT_EVIDENCE_RELATION_VERSION,
@@ -72,40 +133,23 @@ export function reconcileObservationConceptEvidenceSupports(
   }
 
   return deps.db.transaction((tx) => {
-    const observations = listObservationsForSessions(sessionsChecked, tx);
-    const conceptOccurrences = listConceptOccurrencesForSessions(
-      sessionsChecked,
-      tx,
-    );
-    const desired = buildObservationConceptEvidenceSupports({
-      observations,
-      conceptOccurrences,
-    }).filter((row) => sessionsChecked.includes(row.sessionId));
-    const existing = listObservationConceptEvidenceSupportsForSessions(
-      sessionsChecked,
-      tx,
-    );
-    const existingKeys = observationConceptSupportIdentitySet(existing);
-    const missing = desired.filter(
-      (row) => !existingKeys.has(supportIdentity(row)),
-    );
+    const plan = planObservationConceptEvidenceSupports(sessionsChecked, tx);
     const createdAt = deps.now?.() ?? new Date().toISOString();
     const created = insertObservationConceptEvidenceSupports(
-      missing,
+      plan.missing,
       createdAt,
       tx,
     );
     return {
       status: "reconciled",
       relationVersion: OBSERVATION_CONCEPT_EVIDENCE_RELATION_VERSION,
-      sessionsChecked,
-      desiredSupportCount: desired.length,
-      existingSupportCount: existing.length,
+      sessionsChecked: plan.sessionsChecked,
+      desiredSupportCount: plan.desired.length,
+      existingSupportCount: plan.existingCount,
       created,
-      alreadyPresent: desired.length - missing.length,
+      alreadyPresent: plan.desired.length - plan.missing.length,
       removed: 0,
-      uniqueObservationConceptPairs:
-        toObservationConceptRelationPairs(desired).length,
+      uniqueObservationConceptPairs: plan.uniqueObservationConceptPairs,
     };
   });
 }

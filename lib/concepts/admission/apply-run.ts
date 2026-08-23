@@ -18,6 +18,11 @@ import {
   type InitialApplyResult,
 } from "./apply-transaction";
 import {
+  afterConceptOccurrenceSessionsCommitted,
+  type ObservationConceptRelationLifecycleResult,
+  type ObservationConceptRelationReconcileFn,
+} from "@/lib/observations/observation-concept-relation-lifecycle";
+import {
   assertResultPathWritable,
   atomicWriteJsonFile,
   buildApplyResult,
@@ -62,6 +67,7 @@ export type ConceptAdmissionApplyWriteDeps = {
   assertResultWritable?: (path: string) => void;
   applyManifest?: typeof applyInitialAdmissionManifest;
   now?: () => string;
+  reconcileRelations?: ObservationConceptRelationReconcileFn;
 };
 
 export type ConceptAdmissionApplyWriteOutcome =
@@ -74,6 +80,7 @@ export type ConceptAdmissionApplyWriteOutcome =
       report: ConceptAdmissionApplyResult;
       readyForApply: ReadyForApply;
       preflight: ApplyPreflightResult;
+      relationReconciliation: ObservationConceptRelationLifecycleResult;
       summary: string;
     }
   | {
@@ -86,6 +93,7 @@ export type ConceptAdmissionApplyWriteOutcome =
       report: ConceptAdmissionApplyResult;
       readyForApply: ReadyForApply;
       preflight: ApplyPreflightResult;
+      relationReconciliation: ObservationConceptRelationLifecycleResult;
       summary: string;
     }
   | {
@@ -351,6 +359,15 @@ export function runConceptAdmissionApplyWrite(
     return rolledBack(applied);
   }
 
+  const relationReconciliation = afterConceptOccurrenceSessionsCommitted(
+    {
+      sessionIds: manifest.admittedCandidates.flatMap((candidate) =>
+        candidate.occurrences.map((occurrence) => occurrence.sessionId),
+      ),
+    },
+    { db: deps.db, reconcile: deps.reconcileRelations },
+  );
+
   const verification = verifyAppliedRegistry(manifest, applied.mapping, deps.db);
   const report = buildApplyResult({
     manifest,
@@ -384,6 +401,7 @@ export function runConceptAdmissionApplyWrite(
       report,
       readyForApply,
       preflight,
+      relationReconciliation,
       summary: formatWriteSummary({
         verdict: "APPLIED_REPORT_FAILED",
         transactionCommitted: true,
@@ -405,6 +423,7 @@ export function runConceptAdmissionApplyWrite(
     report,
     readyForApply,
     preflight,
+    relationReconciliation,
     summary: formatWriteSummary({
       verdict: "APPLIED",
       transactionCommitted: true,
