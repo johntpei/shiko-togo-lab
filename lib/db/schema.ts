@@ -249,6 +249,39 @@ export const conceptOccurrences = sqliteTable(
   ],
 );
 
+export const observationConceptEvidenceSupports = sqliteTable(
+  "observation_concept_evidence_supports",
+  {
+    observationId: text("observation_id")
+      .notNull()
+      .references(() => observations.id, { onDelete: "cascade" }),
+    conceptId: text("concept_id")
+      .notNull()
+      .references(() => concepts.id, { onDelete: "cascade" }),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    evidenceRef: text("evidence_ref").notNull(),
+    relationVersion: text("relation_version").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.relationVersion,
+        table.observationId,
+        table.conceptId,
+        table.sessionId,
+        table.messageId,
+        table.evidenceRef,
+      ],
+    }),
+  ],
+);
+
 export const conceptProcessingCheckpoints = sqliteTable(
   "concept_processing_checkpoints",
   {
@@ -278,5 +311,7 @@ export type ObservationRecord = typeof observations.$inferSelect;
 export type ConceptRecord = typeof concepts.$inferSelect;
 export type ConceptAliasRecord = typeof conceptAliases.$inferSelect;
 export type ConceptOccurrenceRecord = typeof conceptOccurrences.$inferSelect;
+export type ObservationConceptEvidenceSupportRecord =
+  typeof observationConceptEvidenceSupports.$inferSelect;
 export type ConceptProcessingCheckpointRecord =
   typeof conceptProcessingCheckpoints.$inferSelect;

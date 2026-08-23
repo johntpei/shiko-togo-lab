@@ -209,11 +209,11 @@ test("A. empty → match 0", () => {
   assert.equal(audit.counts.tierBOnlyMatchCount, 0);
   assert.equal(audit.projectionC.edgeCount, 0);
   assert.equal(audit.projectionD.edgeCount, 0);
-  assert.equal(audit.contract.tierA.possibleFromContract, false);
-  assert.equal(audit.contract.observationHasEvidenceRef, false);
+  assert.equal(audit.contract.tierA.possibleFromContract, true);
+  assert.equal(audit.contract.observationHasEvidenceRef, true);
 });
 
-test("B. extra Observation evidenceRef is not invented into Tier A", () => {
+test("B. Observation evidenceRef enables prospective Tier A", () => {
   const audit = buildThoughtMapProvenanceJoinAudit({
     concepts: [{ conceptId: "c-1" }],
     observations: [
@@ -238,13 +238,43 @@ test("B. extra Observation evidenceRef is not invented into Tier A", () => {
       }),
     ],
   });
+  assert.equal(audit.counts.tierAMatchCount, 1);
+  assert.equal(audit.counts.tierBOnlyMatchCount, 0);
+  assert.equal(
+    audit.matches[0]?.strongestTier,
+    PROVENANCE_MATCH_TIERS.exactEvidenceAnchor,
+  );
+  assert.equal(audit.contract.uniqueEvidenceIdentity.sharedExactEvidenceKey, true);
+  assert.equal(audit.projectionC.edgeCount, 1);
+});
+
+test("B2. messageRef is not treated as evidenceRef", () => {
+  const audit = buildThoughtMapProvenanceJoinAudit({
+    concepts: [{ conceptId: "c-1" }],
+    observations: [
+      {
+        observationId: "obs-1",
+        kind: "connection",
+        payload: connectionPayload([
+          evidence({ sessionId: "s-1", messageId: "m-1" }),
+        ]),
+      },
+    ],
+    conceptOccurrences: [
+      occurrence({
+        conceptId: "c-1",
+        sessionId: "s-1",
+        messageId: "m-1",
+        evidenceRef: "M001:E01",
+      }),
+    ],
+  });
   assert.equal(audit.counts.tierAMatchCount, 0);
   assert.equal(audit.counts.tierBOnlyMatchCount, 1);
   assert.equal(
     audit.matches[0]?.strongestTier,
     PROVENANCE_MATCH_TIERS.exactMessageAnchor,
   );
-  assert.equal(audit.contract.uniqueEvidenceIdentity.sharedExactEvidenceKey, false);
 });
 
 test("C. same message / different EvidenceRef stays Tier B, not Tier A", () => {
@@ -395,6 +425,48 @@ test("G. multiple Concepts on the same message → multiple pairs", () => {
   );
 });
 
+test("G2. multiple Concepts on the same evidenceRef → multiple Tier A pairs", () => {
+  const audit = buildThoughtMapProvenanceJoinAudit({
+    concepts: [{ conceptId: "c-2" }, { conceptId: "c-1" }],
+    observations: [
+      {
+        observationId: "obs-1",
+        kind: "connection",
+        payload: connectionPayload([
+          evidence({
+            sessionId: "s-1",
+            messageId: "m-1",
+            evidenceRef: "M001:E01",
+          }),
+        ]),
+      },
+    ],
+    conceptOccurrences: [
+      occurrence({
+        conceptId: "c-2",
+        sessionId: "s-1",
+        messageId: "m-1",
+        evidenceRef: "M001:E01",
+      }),
+      occurrence({
+        conceptId: "c-1",
+        sessionId: "s-1",
+        messageId: "m-1",
+        evidenceRef: "M001:E01",
+      }),
+    ],
+  });
+  assert.equal(audit.counts.tierAMatchCount, 2);
+  assert.equal(audit.counts.tierBOnlyMatchCount, 0);
+  assert.deepEqual(
+    audit.matches.map((match) => match.strongestTier),
+    [
+      PROVENANCE_MATCH_TIERS.exactEvidenceAnchor,
+      PROVENANCE_MATCH_TIERS.exactEvidenceAnchor,
+    ],
+  );
+});
+
 test("H. multiple matching anchors for the same pair → 1 pair + supportCount", () => {
   const audit = buildThoughtMapProvenanceJoinAudit({
     concepts: [{ conceptId: "c-1" }],
@@ -536,6 +608,84 @@ test("M. Connection top-level evidence is audited without sideA/sideB", () => {
   assert.equal(anchors.length, 1);
   assert.equal(anchors[0]?.evidenceRole, "primary");
   assert.equal(anchors[0]?.hasEvidenceRef, false);
+});
+
+test("M2. Connection evidenceRef is extracted when present", () => {
+  const anchors = extractObservationEvidenceAnchors({
+    observationId: "obs-c",
+    kind: "connection",
+    payload: connectionPayload([
+      evidence({
+        sessionId: "s-1",
+        messageId: "m-1",
+        evidenceRef: "M001:E02",
+      }),
+    ]),
+  });
+  assert.equal(anchors[0]?.sessionId, "s-1");
+  assert.equal(anchors[0]?.messageId, "m-1");
+  assert.equal(anchors[0]?.evidenceRef, "M001:E02");
+  assert.equal(anchors[0]?.hasEvidenceRef, true);
+});
+
+test("L2. Tension sides keep distinct evidenceRef values", () => {
+  const anchors = extractObservationEvidenceAnchors({
+    observationId: "obs-t",
+    kind: "tension",
+    payload: tensionPayload({
+      sideA: [
+        evidence({
+          sessionId: "s-a",
+          messageId: "m-a",
+          evidenceRef: "M001:E01",
+        }),
+      ],
+      sideB: [
+        evidence({
+          sessionId: "s-b",
+          messageId: "m-b",
+          evidenceRef: "M002:E01",
+        }),
+      ],
+    }),
+  });
+  assert.deepEqual(
+    anchors.map((anchor) => [anchor.evidenceRole, anchor.evidenceRef]),
+    [
+      ["side_a", "M001:E01"],
+      ["side_b", "M002:E01"],
+    ],
+  );
+});
+
+test("N2. Shift before/after evidenceRef is extracted", () => {
+  const anchors = extractObservationEvidenceAnchors({
+    observationId: "obs-s",
+    kind: "shift",
+    payload: shiftPayload({
+      before: [
+        evidence({
+          sessionId: "s-1",
+          messageId: "m-before",
+          evidenceRef: "M001:E01",
+        }),
+      ],
+      after: [
+        evidence({
+          sessionId: "s-1",
+          messageId: "m-after",
+          evidenceRef: "M003:E01",
+        }),
+      ],
+    }),
+  });
+  assert.deepEqual(
+    anchors.map((anchor) => [anchor.evidenceRole, anchor.evidenceRef]),
+    [
+      ["before", "M001:E01"],
+      ["after", "M003:E01"],
+    ],
+  );
 });
 
 test("N. Shift contract uses beforeEvidence / afterEvidence locators only", () => {

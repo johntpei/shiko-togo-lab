@@ -43,6 +43,13 @@
       "when": 1787200000000,
       "tag": "0005_concept_processing_checkpoints",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1787300000000,
+      "tag": "0006_observation_concept_evidence_supports",
+      "breakpoints": true
     }
   ]
 }

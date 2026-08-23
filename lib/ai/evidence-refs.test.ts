@@ -36,6 +36,9 @@ test("Case G: 有効な ref は validated = true で原文を quote にする", 
   const result = resolveEvidenceRef("M001:E01", unitsByRef, contentByMessageId);
   assert.equal(result.validated, true);
   assert.equal(result.messageId, "msg-1");
+  assert.equal(result.evidenceRef, "M001:E01");
+  assert.equal(result.evidenceRef, unitsByRef.get("M001:E01")!.ref);
+  assert.notEqual(result.evidenceRef, unitsByRef.get("M001:E01")!.messageRef);
   assert.ok(content.includes(result.quote));
   assert.equal(
     content.slice(
@@ -57,6 +60,7 @@ test("Case H: 存在しない ref は validated = false", () => {
   assert.equal(result.validated, false);
   assert.equal(result.reason, "invalid_evidence_ref");
   assert.equal(result.messageId, null);
+  assert.equal(result.evidenceRef, null);
 });
 
 test("Case I: 別 Message を指す不正 ref は validated = false", () => {

@@ -77,6 +77,10 @@ export type IntegratedReviewDeps = {
 };
 
 function toStoredEvidence(evidence: ValidatedEvidence): StoredReviewEvidence {
+  const evidenceRef =
+    evidence.validated && evidence.evidenceRef && evidence.evidenceRef.trim() !== ""
+      ? evidence.evidenceRef
+      : undefined;
   return {
     messageRef: evidence.messageRef,
     quote: evidence.quote,
@@ -87,6 +91,7 @@ function toStoredEvidence(evidence: ValidatedEvidence): StoredReviewEvidence {
     occurredAt: evidence.occurredAt ?? null,
     role: evidence.role ?? null,
     reason: evidence.reason,
+    ...(evidenceRef ? { evidenceRef } : {}),
   };
 }
 

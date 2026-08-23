@@ -100,5 +100,62 @@ test("tension の sideA / sideB を payload から復元する", () => {
   if (parsed?.kind === "tension") {
     assert.equal(parsed.payload.sideA?.text, "A");
     assert.equal(parsed.payload.sideB?.text, "B");
+    assert.equal(parsed.payload.sideA?.evidence[0]?.evidenceRef, undefined);
+  }
+});
+
+test("evidenceRef の無い既存 Observation も読める", () => {
+  const parsed = observationFromRecord(
+    record({
+      kind: "connection",
+      payload: JSON.stringify({
+        text: "つながっている",
+        evidence: [
+          {
+            messageRef: "S01:M001:E01",
+            quote: "x",
+            validated: true,
+            messageId: "m-1",
+            sessionId: "s1",
+          },
+        ],
+        semanticValid: true,
+        relationType: "complement",
+      }),
+    }),
+    ["s1", "s2"],
+  );
+  assert.equal(parsed?.kind, "connection");
+  if (parsed?.kind === "connection") {
+    assert.equal(parsed.payload.evidence[0]?.evidenceRef, undefined);
+    assert.equal(parsed.payload.text, "つながっている");
+  }
+});
+
+test("新しい Observation は evidenceRef を保持する", () => {
+  const parsed = observationFromRecord(
+    record({
+      kind: "connection",
+      payload: JSON.stringify({
+        text: "つながっている",
+        evidence: [
+          {
+            messageRef: "S01:M001:E01",
+            quote: "x",
+            validated: true,
+            messageId: "m-1",
+            sessionId: "s1",
+            evidenceRef: "S01:M001:E01",
+          },
+        ],
+        semanticValid: true,
+        relationType: "complement",
+      }),
+    }),
+    ["s1", "s2"],
+  );
+  assert.equal(parsed?.kind, "connection");
+  if (parsed?.kind === "connection") {
+    assert.equal(parsed.payload.evidence[0]?.evidenceRef, "S01:M001:E01");
   }
 });

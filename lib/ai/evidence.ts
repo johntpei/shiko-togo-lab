@@ -23,6 +23,8 @@ export type ValidatedEvidence = RawEvidence & {
   sessionId?: string | null;
   sessionTitle?: string | null;
   occurredAt?: string | null;
+  /** Server-owned Evidence Unit identity. Set only after resolveEvidenceRef succeeds. */
+  evidenceRef?: string | null;
 };
 
 const KINDS_REQUIRING_EVIDENCE = new Set(["fact", "decision", "action"]);

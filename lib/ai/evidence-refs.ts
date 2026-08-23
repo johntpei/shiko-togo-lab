@@ -37,6 +37,7 @@ export function resolveEvidenceRef(
       validated: false,
       reason: "invalid_evidence_ref",
       role: null,
+      evidenceRef: null,
     });
   }
 
@@ -50,6 +51,7 @@ export function resolveEvidenceRef(
         validated: false,
         reason: "invalid_message_ref",
         role: unit.role,
+        evidenceRef: null,
       },
       unit,
     );
@@ -65,6 +67,7 @@ export function resolveEvidenceRef(
         validated: false,
         reason: "quote_not_found",
         role: unit.role,
+        evidenceRef: null,
       },
       unit,
     );
@@ -78,6 +81,7 @@ export function resolveEvidenceRef(
       validated: true,
       reason: null,
       role: unit.role,
+      evidenceRef: unit.ref,
     },
     unit,
   );

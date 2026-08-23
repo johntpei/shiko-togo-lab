@@ -169,6 +169,7 @@ export const storedReviewEvidenceSchema = z.object({
   occurredAt: z.string().nullable().optional(),
   role: z.enum(EVIDENCE_ROLES).nullable().optional(),
   reason: z.enum(EVIDENCE_FAILURE_REASONS).nullable().optional(),
+  evidenceRef: z.string().nullable().optional(),
 });
 
 const storedReviewItemBase = {

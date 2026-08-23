@@ -64,16 +64,16 @@ export type ThoughtMapProvenanceJoinAudit = {
   version: typeof THOUGHT_MAP_PROVENANCE_JOIN_AUDIT_VERSION;
   contract: {
     observationEvidenceFields: string[];
-    observationHasEvidenceRef: false;
+    observationHasEvidenceRef: true;
     conceptOccurrenceFields: string[];
     uniqueEvidenceIdentity: {
       conceptOccurrence: string[];
       observationEvidence: string[];
-      sharedExactEvidenceKey: false;
+      sharedExactEvidenceKey: true;
     };
     tierA: {
       fields: string[];
-      possibleFromContract: false;
+      possibleFromContract: true;
     };
     tierB: {
       fields: string[];
@@ -88,7 +88,7 @@ export type ThoughtMapProvenanceJoinAudit = {
     observation: {
       sessionId: "yes";
       messageId: "yes_nullable";
-      evidenceRef: "no";
+      evidenceRef: "yes_optional";
       occurredAt: "yes_optional";
       sourceRole: "yes_optional_as_role";
       messageRef: "yes_not_join_key";
@@ -103,7 +103,7 @@ export type ThoughtMapProvenanceJoinAudit = {
     exactJoin: {
       sessionId: "yes_if_observation_populated";
       messageId: "yes_if_observation_populated";
-      evidenceRef: "no";
+      evidenceRef: "yes_if_observation_populated";
       occurredAt: "not_used";
       sourceRole: "not_used";
     };
@@ -157,6 +157,7 @@ const OBSERVATION_EVIDENCE_FIELDS = [
   "occurredAt",
   "role",
   "reason",
+  "evidenceRef",
 ] as const;
 
 const CONCEPT_OCCURRENCE_FIELDS = [
@@ -202,16 +203,17 @@ function readAnchor(
   const row = value as Record<string, unknown>;
   const sessionId = nonEmptyString(row.sessionId);
   const messageId = nonEmptyString(row.messageId);
+  const evidenceRef = nonEmptyString(row.evidenceRef);
   return {
     observationId,
     observationKind,
     evidenceRole,
     sessionId,
     messageId,
-    evidenceRef: null,
+    evidenceRef,
     hasSessionId: sessionId !== null,
     hasMessageId: messageId !== null,
-    hasEvidenceRef: false,
+    hasEvidenceRef: evidenceRef !== null,
     hasMessageRef: nonEmptyString(row.messageRef) !== null,
     hasOccurredAt: nonEmptyString(row.occurredAt) !== null,
     hasRole: nonEmptyString(row.role) !== null,
@@ -485,7 +487,7 @@ export function buildThoughtMapProvenanceJoinAudit(
     version: THOUGHT_MAP_PROVENANCE_JOIN_AUDIT_VERSION,
     contract: {
       observationEvidenceFields: [...OBSERVATION_EVIDENCE_FIELDS],
-      observationHasEvidenceRef: false,
+      observationHasEvidenceRef: true,
       conceptOccurrenceFields: [...CONCEPT_OCCURRENCE_FIELDS],
       uniqueEvidenceIdentity: {
         conceptOccurrence: [
@@ -495,12 +497,12 @@ export function buildThoughtMapProvenanceJoinAudit(
           "evidenceRef",
           "conceptId",
         ],
-        observationEvidence: ["messageId"],
-        sharedExactEvidenceKey: false,
+        observationEvidence: ["sessionId", "messageId", "evidenceRef"],
+        sharedExactEvidenceKey: true,
       },
       tierA: {
         fields: ["sessionId", "messageId", "evidenceRef"],
-        possibleFromContract: false,
+        possibleFromContract: true,
       },
       tierB: {
         fields: ["sessionId", "messageId"],
@@ -515,7 +517,7 @@ export function buildThoughtMapProvenanceJoinAudit(
       observation: {
         sessionId: "yes",
         messageId: "yes_nullable",
-        evidenceRef: "no",
+        evidenceRef: "yes_optional",
         occurredAt: "yes_optional",
         sourceRole: "yes_optional_as_role",
         messageRef: "yes_not_join_key",
@@ -530,7 +532,7 @@ export function buildThoughtMapProvenanceJoinAudit(
       exactJoin: {
         sessionId: "yes_if_observation_populated",
         messageId: "yes_if_observation_populated",
-        evidenceRef: "no",
+        evidenceRef: "yes_if_observation_populated",
         occurredAt: "not_used",
         sourceRole: "not_used",
       },
@@ -590,13 +592,13 @@ export function formatThoughtMapProvenanceJoinAudit(
     "locator compatibility:",
     "  sessionId: observation=yes conceptOccurrence=yes exactJoin=if_populated",
     "  messageId: observation=nullable conceptOccurrence=yes exactJoin=if_populated",
-    "  evidenceRef: observation=no conceptOccurrence=yes exactJoin=no",
+    "  evidenceRef: observation=optional conceptOccurrence=yes exactJoin=if_populated",
     "  occurredAt: not used as join key",
     "  sourceRole: not used as join key",
     "  messageRef: observation-only review ref; not evidenceRef",
     "",
     "tiers:",
-    "  A exact evidence anchor: sessionId+messageId+evidenceRef; possibleFromContract=false",
+    "  A exact evidence anchor: sessionId+messageId+evidenceRef; possibleFromContract=true",
     "  B exact message anchor: sessionId+messageId; possibleFromContract=true",
     "  C session-only: diagnostic count only; not a direct edge",
     "",

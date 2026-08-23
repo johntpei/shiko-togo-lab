@@ -44,6 +44,7 @@ function evidence(input: {
     occurredAt: input.occurredAt ?? null,
     role: "user",
     reason: null,
+    evidenceRef: input.ref,
   };
 }
 
@@ -396,6 +397,8 @@ test("SQLite に Observation を保存し unique 制約で重複しない", () =
   assert.equal(shifts[0]?.sourceRef, "R:SHIFT:01");
   const parsed = JSON.parse(shifts[0]?.payload ?? "{}") as StoredReviewShiftItem;
   assert.equal(parsed.before, "自由に考えたい");
+  assert.equal(parsed.beforeEvidence[0]?.evidenceRef, "S01:M001:E01");
+  assert.equal(parsed.afterEvidence[0]?.evidenceRef, "S02:M001:E01");
 
   const sessionIds = listObservationSessionIds(shifts[0]?.id ?? "", db).sort();
   assert.deepEqual(sessionIds, ["s1", "s2"]);

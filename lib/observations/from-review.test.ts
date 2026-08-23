@@ -30,6 +30,7 @@ function evidence(input: {
     occurredAt: input.occurredAt ?? null,
     role: "user",
     reason: null,
+    evidenceRef: input.ref,
   };
 }
 
@@ -472,4 +473,35 @@ test("Evidence.occurredAt があれば Session 日付より優先する", () => 
   });
   assert.equal(observations[0]?.firstSeenAt, "2026-07-18");
   assert.equal(observations[0]?.lastSeenAt, "2026-08-02");
+});
+
+test("Connection / Tension / Shift の evidenceRef を payload まで保持する", () => {
+  const observations = project();
+  const shiftObservation = observations.find((item) => item.kind === "shift");
+  const connectionObservation = observations.find((item) => item.kind === "connection");
+  const tensionObservation = observations.find((item) => item.kind === "tension");
+  assert.equal(
+    shiftObservation?.payload.beforeEvidence[0]?.evidenceRef,
+    "S01:M001:E01",
+  );
+  assert.equal(
+    shiftObservation?.payload.afterEvidence[0]?.evidenceRef,
+    "S02:M001:E01",
+  );
+  assert.equal(
+    connectionObservation?.payload.evidence[0]?.evidenceRef,
+    "S01:M002:E01",
+  );
+  assert.equal(
+    tensionObservation?.payload.sideA?.evidence[0]?.evidenceRef,
+    "S01:M001:E01",
+  );
+  assert.equal(
+    tensionObservation?.payload.sideB?.evidence[0]?.evidenceRef,
+    "S02:M001:E01",
+  );
+  assert.notEqual(
+    connectionObservation?.payload.evidence[0]?.evidenceRef,
+    "M001",
+  );
 });
