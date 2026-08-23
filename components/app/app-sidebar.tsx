@@ -2,6 +2,7 @@
 
 import {
   BrainCircuit,
+  CalendarClock,
   House,
   MessagesSquare,
   Package,
@@ -15,6 +16,7 @@ import { APP_NAME } from "@/lib/app/identity";
 
 const nav = [
   { href: "/", label: "ホーム", icon: House },
+  { href: "/timeline", label: "Timeline", icon: CalendarClock },
   { href: "/sessions", label: "Session", icon: MessagesSquare },
   { href: "/imports/chatgpt", label: "ChatGPT読込", icon: Upload },
   { href: "/reviews", label: "レビュー", icon: ScanSearch },

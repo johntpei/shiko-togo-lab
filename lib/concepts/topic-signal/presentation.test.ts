@@ -85,6 +85,20 @@ function bothGroups(): TopicSignalSet {
   };
 }
 
+function panelSource() {
+  return readFileSync(
+    resolve(process.cwd(), "components/app/topic-signal-panel.tsx"),
+    "utf8",
+  );
+}
+
+function homeSource() {
+  return readFileSync(
+    resolve(process.cwd(), "components/app/observatory-home.tsx"),
+    "utf8",
+  );
+}
+
 test("A. both groups render labels and details", () => {
   const model = buildTopicSignalPresentation(bothGroups());
   assert.equal(model.overallEmpty, false);
@@ -98,37 +112,81 @@ test("A. both groups render labels and details", () => {
   );
   assert.equal(model.recentlyObserved[0]?.detail, "2026/08/02 に観測");
   assert.equal(model.recurrence[0]?.detail, "2回・2つの会話");
+  assert.match(TOPIC_SIGNAL_UI_COPY.recentlyObservedTitle, /直近7日/);
+  assert.match(TOPIC_SIGNAL_UI_COPY.recurrenceTitle, /会話をまたいで/);
 });
 
-test("B. recently only keeps recurrence empty copy available", () => {
-  const signals = bothGroups();
-  signals.crossSessionRecurrence = [];
-  const model = buildTopicSignalPresentation(signals);
-  assert.equal(model.recentlyObserved.length, 2);
-  assert.equal(model.recurrence.length, 0);
-  assert.equal(model.overallEmpty, false);
-  assert.match(TOPIC_SIGNAL_UI_COPY.recurrenceEmpty, /まだありません/);
+test("B. compact grouped structure, not independent Concept cards", () => {
+  const source = panelSource();
+  assert.match(source, /sm:grid-cols-2/);
+  assert.match(source, /grid-cols-1/);
+  assert.match(source, /function SignalGroup/);
+  assert.match(source, /function SignalRow/);
+  assert.match(source, /border-t border-line/);
+  assert.doesNotMatch(source, /shadow-\[/);
+  assert.doesNotMatch(source, /text-base font-black/);
+  const home = homeSource();
+  const spotlightAt = home.indexOf(
+    "<ObservationCard observation={model.spotlight} featured />",
+  );
+  const panelAt = home.indexOf("<TopicSignalPanel");
+  const shiftsAt = home.indexOf('title="最近の変化"');
+  assert.ok(spotlightAt >= 0 && panelAt >= 0 && shiftsAt >= 0);
+  assert.ok(spotlightAt < panelAt);
+  assert.ok(panelAt < shiftsAt);
 });
 
-test("C. recurrence only keeps recent empty copy available", () => {
-  const signals = bothGroups();
-  signals.recentlyObserved = [];
-  const model = buildTopicSignalPresentation(signals);
-  assert.equal(model.recentlyObserved.length, 0);
-  assert.equal(model.recurrence.length, 2);
-  assert.equal(model.overallEmpty, false);
+test("C. recently copy is asOf-window, not wall-clock", () => {
+  const copy = `${TOPIC_SIGNAL_UI_COPY.recentlyObservedTitle}\n${TOPIC_SIGNAL_UI_COPY.recentlyObservedDescription}`;
+  assert.match(copy, /観測データ内の直近7日/);
+  assert.doesNotMatch(copy, /今日/);
+  assert.doesNotMatch(copy, /今週/);
+  assert.doesNotMatch(copy, /現在/);
 });
 
-test("D. both empty is a normal empty state", () => {
-  const model = buildTopicSignalPresentation(emptySignals());
-  assert.equal(model.overallEmpty, true);
-  assert.equal(model.recentlyObserved.length, 0);
-  assert.equal(model.recurrence.length, 0);
-  assert.equal(model.asOfLabel, null);
-  assert.match(TOPIC_SIGNAL_UI_COPY.overallEmpty, /会話が蓄積されると/);
+test("D. increase disclaimer is not required in visible helper", () => {
+  assert.doesNotMatch(
+    TOPIC_SIGNAL_UI_COPY.recentlyObservedDescription,
+    /増えていることを意味するものではありません/,
+  );
 });
 
-test("E. overlap: same Concept appears in both groups", () => {
+test("E. no rising language", () => {
+  const copy = [
+    TOPIC_SIGNAL_UI_COPY.sectionTitle,
+    TOPIC_SIGNAL_UI_COPY.recentlyObservedTitle,
+    TOPIC_SIGNAL_UI_COPY.recentlyObservedDescription,
+    TOPIC_SIGNAL_UI_COPY.recurrenceTitle,
+    TOPIC_SIGNAL_UI_COPY.recurrenceDescription,
+  ].join("\n");
+  assert.doesNotMatch(copy, /増えている/);
+  assert.doesNotMatch(copy, /上昇/);
+  assert.doesNotMatch(copy, /急上昇/);
+  const source = panelSource();
+  assert.doesNotMatch(source, /↑/);
+  assert.doesNotMatch(source, /text-green/);
+  assert.doesNotMatch(source, /"rising"/);
+});
+
+test("F. recurrence copy is multiple conversations only", () => {
+  const copy = `${TOPIC_SIGNAL_UI_COPY.recurrenceTitle}\n${TOPIC_SIGNAL_UI_COPY.recurrenceDescription}`;
+  assert.match(copy, /複数の会話/);
+  assert.doesNotMatch(copy, /重要/);
+  assert.doesNotMatch(copy, /関心/);
+  assert.doesNotMatch(copy, /根深い/);
+  assert.doesNotMatch(copy, /悩んでいる/);
+});
+
+test("G. asOf remains visible in the section header row", () => {
+  const model = buildTopicSignalPresentation(bothGroups());
+  assert.equal(model.asOfLabel, "観測データ: 2026/08/02 まで");
+  const source = panelSource();
+  assert.match(source, /asOfLabel/);
+  assert.match(source, /flex-wrap/);
+  assert.match(source, /justify-between/);
+});
+
+test("H. overlap: same Concept appears in both groups", () => {
   const signals = bothGroups();
   signals.recentlyObserved = [
     {
@@ -164,12 +222,40 @@ test("E. overlap: same Concept appears in both groups", () => {
   assert.equal(model.recurrence[0]?.canonicalLabel, "人間関係");
 });
 
-test("F. canonicalLabel is displayed", () => {
-  const model = buildTopicSignalPresentation(bothGroups());
-  assert.equal(model.recentlyObserved[1]?.canonicalLabel, "寂しさ");
+test("I. empty recent keeps recurrence visible", () => {
+  const signals = bothGroups();
+  signals.recentlyObserved = [];
+  const model = buildTopicSignalPresentation(signals);
+  assert.equal(model.recentlyObserved.length, 0);
+  assert.equal(model.recurrence.length, 2);
+  assert.equal(model.overallEmpty, false);
+  assert.match(TOPIC_SIGNAL_UI_COPY.recentlyObservedEmpty, /この期間/);
 });
 
-test("G. raw Concept ID / normalizedKey are not in visible fields", () => {
+test("J. empty recurrence keeps recent visible", () => {
+  const signals = bothGroups();
+  signals.crossSessionRecurrence = [];
+  const model = buildTopicSignalPresentation(signals);
+  assert.equal(model.recentlyObserved.length, 2);
+  assert.equal(model.recurrence.length, 0);
+  assert.equal(model.overallEmpty, false);
+  assert.match(TOPIC_SIGNAL_UI_COPY.recurrenceEmpty, /まだありません/);
+});
+
+test("K. both empty is a normal empty state without two group cards", () => {
+  const model = buildTopicSignalPresentation(emptySignals());
+  assert.equal(model.overallEmpty, true);
+  assert.equal(model.recentlyObserved.length, 0);
+  assert.equal(model.recurrence.length, 0);
+  assert.equal(model.asOfLabel, null);
+  assert.match(TOPIC_SIGNAL_UI_COPY.overallEmpty, /会話が蓄積されると/);
+  const source = panelSource();
+  assert.match(source, /overallEmpty \?/);
+  assert.doesNotMatch(TOPIC_SIGNAL_UI_COPY.overallEmpty, /失敗/);
+  assert.doesNotMatch(TOPIC_SIGNAL_UI_COPY.overallEmpty, /データ不足/);
+});
+
+test("L. raw Concept ID / normalizedKey are not in visible fields", () => {
   const model = buildTopicSignalPresentation(bothGroups());
   const visible = JSON.stringify(model);
   assert.equal(visible.includes(UUID), false);
@@ -177,51 +263,7 @@ test("G. raw Concept ID / normalizedKey are not in visible fields", () => {
   assert.equal("conceptId" in model.recentlyObserved[0]!, false);
 });
 
-test("H. recently copy does not suggest increase", () => {
-  const copy = `${TOPIC_SIGNAL_UI_COPY.recentlyObservedTitle}\n${TOPIC_SIGNAL_UI_COPY.recentlyObservedDescription}`;
-  assert.match(copy, /直近7日間/);
-  assert.match(copy, /増えていることを意味するものではありません/);
-  assert.doesNotMatch(copy, /上昇/);
-  assert.doesNotMatch(copy, /強くなっている/);
-  assert.doesNotMatch(copy, /今週/);
-  assert.doesNotMatch(copy, /今日/);
-});
-
-test("I. recurrence copy does not suggest importance", () => {
-  const copy = `${TOPIC_SIGNAL_UI_COPY.recurrenceTitle}\n${TOPIC_SIGNAL_UI_COPY.recurrenceDescription}`;
-  assert.match(copy, /別々の会話/);
-  assert.doesNotMatch(copy, /重要/);
-  assert.doesNotMatch(copy, /関心/);
-  assert.doesNotMatch(copy, /根深い/);
-  assert.doesNotMatch(copy, /悩んでいる/);
-});
-
-test("J. no score in presentation", () => {
-  const model = buildTopicSignalPresentation(bothGroups());
-  const serialized = JSON.stringify(model);
-  assert.equal(serialized.includes("score"), false);
-  const source = readFileSync(
-    resolve(process.cwd(), "lib/concepts/topic-signal/presentation.ts"),
-    "utf8",
-  );
-  assert.doesNotMatch(source, /signalScore/);
-});
-
-test("K. no trend classification in presentation / panel", () => {
-  const files = [
-    "lib/concepts/topic-signal/presentation.ts",
-    "components/app/topic-signal-panel.tsx",
-  ];
-  for (const file of files) {
-    const source = readFileSync(resolve(process.cwd(), file), "utf8");
-    assert.doesNotMatch(source, /"rising"/);
-    assert.doesNotMatch(source, /"falling"/);
-    assert.doesNotMatch(source, /emerging/);
-    assert.doesNotMatch(source, /dormant/);
-  }
-});
-
-test("L. USER本文なし", () => {
+test("M. USER本文なし", () => {
   const signals = bothGroups();
   signals.recentlyObserved[0] = {
     ...signals.recentlyObserved[0]!,
@@ -232,31 +274,23 @@ test("L. USER本文なし", () => {
   assert.equal(serialized.includes("surfaceForm"), false);
 });
 
-test("M. empty copy is not an error message", () => {
-  assert.doesNotMatch(TOPIC_SIGNAL_UI_COPY.overallEmpty, /失敗/);
-  assert.doesNotMatch(TOPIC_SIGNAL_UI_COPY.overallEmpty, /データ不足/);
-  assert.doesNotMatch(TOPIC_SIGNAL_UI_COPY.recentlyObservedEmpty, /失敗/);
-  const page = readFileSync(
-    resolve(process.cwd(), "app/(app)/page.tsx"),
-    "utf8",
-  );
-  assert.match(page, /loadTopicSignals/);
-  assert.doesNotMatch(page, /catch/);
-});
-
-test("N. panel markup is wrap-safe and uses semantic headings", () => {
-  const source = readFileSync(
-    resolve(process.cwd(), "components/app/topic-signal-panel.tsx"),
-    "utf8",
-  );
+test("N. panel markup is wrap-safe, semantic, and does not classify", () => {
+  const source = panelSource();
   assert.match(source, /<h2/);
   assert.match(source, /<h3/);
   assert.match(source, /min-w-0/);
   assert.match(source, /break-words/);
+  assert.match(source, /overflow-hidden/);
   assert.doesNotMatch(source, /"use client"/);
   assert.doesNotMatch(source, /occurrenceCount\s*>=/);
   assert.doesNotMatch(source, /loadTopicSignals/);
   assert.doesNotMatch(source, /from "\.\/diagnostic"/);
   assert.doesNotMatch(source, /topic-signal-diagnostic/);
   assert.match(source, /TopicSignalPresentationModel/);
+  const page = readFileSync(
+    resolve(process.cwd(), "app/(app)/page.tsx"),
+    "utf8",
+  );
+  assert.match(page, /loadTopicSignals/);
+  assert.doesNotMatch(page, /catch/);
 });

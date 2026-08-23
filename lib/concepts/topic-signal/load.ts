@@ -3,16 +3,23 @@ import { conceptOccurrences, concepts } from "@/lib/db/schema";
 import { buildTopicSignals, type TopicSignalSet } from "./signals";
 import {
   buildTopicSignalSnapshot,
+  type TopicSignalConceptInput,
+  type TopicSignalOccurrenceInput,
   type TopicSignalSnapshot,
 } from "./snapshot";
 
+export type TopicSignalSource = {
+  concepts: TopicSignalConceptInput[];
+  occurrences: TopicSignalOccurrenceInput[];
+};
+
 /**
- * SELECT Concepts + Occurrences, then pure aggregation.
- * Caller injects db. Core does not open a default connection.
+ * SELECT Concepts + Occurrences. Caller injects db.
+ * Core does not open a default connection.
  */
-export function loadTopicSignalSnapshot(input: {
+export function loadTopicSignalSource(input: {
   db: ConceptQueryDb;
-}): TopicSignalSnapshot {
+}): TopicSignalSource {
   const conceptRows = input.db
     .select({
       conceptId: concepts.id,
@@ -28,11 +35,16 @@ export function loadTopicSignalSnapshot(input: {
     })
     .from(conceptOccurrences)
     .all();
-
-  return buildTopicSignalSnapshot({
+  return {
     concepts: conceptRows,
     occurrences: occurrenceRows,
-  });
+  };
+}
+
+export function loadTopicSignalSnapshot(input: {
+  db: ConceptQueryDb;
+}): TopicSignalSnapshot {
+  return buildTopicSignalSnapshot(loadTopicSignalSource(input));
 }
 
 export function loadTopicSignals(input: { db: ConceptQueryDb }): TopicSignalSet {

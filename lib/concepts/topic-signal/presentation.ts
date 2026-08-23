@@ -7,14 +7,14 @@ export const TOPIC_SIGNAL_UI_COPY = {
     "テーマの観測結果は、会話が蓄積されるとここに表示されます。",
   asOfPrefix: "観測データ:",
   asOfSuffix: "まで",
-  recentlyObservedTitle: "最近見えているテーマ",
+  recentlyObservedTitle: "観測データ内の直近7日",
   recentlyObservedDescription:
-    "直近7日間の会話で観測されたテーマです。増えていることを意味するものではありません。",
-  recentlyObservedEmpty: "最近観測されたテーマはまだありません。",
+    "観測データ内の直近7日で見えたテーマです。",
+  recentlyObservedEmpty: "この期間に観測されたテーマはまだありません。",
   recentlyObservedDetailSuffix: "に観測",
-  recurrenceTitle: "会話をまたいで現れたテーマ",
+  recurrenceTitle: "会話をまたいで再び見えたテーマ",
   recurrenceDescription:
-    "別々の会話で複数回観測されたテーマです。",
+    "複数の会話で再び観測されたテーマです。",
   recurrenceEmpty: "複数の会話で再び現れたテーマはまだありません。",
 } as const;
 

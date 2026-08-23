@@ -88,8 +88,6 @@ export function ObservatoryHome({
         複数の対話から、根拠のある変化・接続・緊張関係だけを観測します。
       </p>
 
-      <TopicSignalPanel model={topicSignals} />
-
       {model.totalCount === 0 ? (
         <div className="mt-8 rounded-2xl border border-line bg-white p-5 shadow-[0_12px_40px_-30px_rgba(15,23,42,0.45)] sm:p-6">
           <p className="font-bold text-ink">まだ観測できるデータがありません</p>
@@ -111,13 +109,16 @@ export function ObservatoryHome({
             </Link>
           </div>
         </div>
-      ) : (
+      ) : model.spotlight ? (
+        <section className="mt-8">
+          <ObservationCard observation={model.spotlight} featured />
+        </section>
+      ) : null}
+
+      <TopicSignalPanel model={topicSignals} />
+
+      {model.totalCount > 0 ? (
         <>
-          {model.spotlight ? (
-            <section className="mt-8">
-              <ObservationCard observation={model.spotlight} featured />
-            </section>
-          ) : null}
           <ObservationSection
             title="最近の変化"
             items={model.shifts}
@@ -134,7 +135,7 @@ export function ObservatoryHome({
             empty="まだ十分な根拠のある緊張関係は見つかっていません"
           />
         </>
-      )}
+      ) : null}
 
       <section className="mt-16 border-t border-line pt-10">
         <h2 className="text-lg font-black text-ink">データを追加・分析する</h2>
