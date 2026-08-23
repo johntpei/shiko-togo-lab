@@ -279,6 +279,7 @@ test("不正 schema は task が拒否する", async () => {
 test("task は grounding / candidate validation を再実装しない", () => {
   const source = readFileSync("lib/ai/tasks/concept-extract.ts", "utf8");
   assert.match(source, /resolveConceptActions/);
+  assert.match(source, /runConceptExtractOnUnits/);
   assert.match(source, /validateConceptExtractCoverage/);
   assert.doesNotMatch(source, /validateConceptCandidate/);
   assert.doesNotMatch(source, /groundSurfaceForm/);

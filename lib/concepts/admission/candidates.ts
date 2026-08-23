@@ -51,7 +51,7 @@ export type BuildAdmissionCandidatesResult =
   | { ok: true; candidates: AdmissionCandidate[] }
   | { ok: false; reason: "duplicate_candidate_ref"; detail: string };
 
-type CandidateOccurrence = {
+export type CandidateOccurrence = {
   sessionId: string;
   evidenceRef: string;
   occurredAt: string;
@@ -61,6 +61,58 @@ type CandidateOccurrence = {
 };
 
 const ACCEPTED_RESOLVED = new Set(["new", "match"]);
+
+export type AdmissionOccurrenceRow = CandidateOccurrence;
+
+export function collectAdmissionOccurrences(
+  snapshot: AdmissionPilotSnapshot,
+  sessionOccurredAt?: Record<string, string>,
+) {
+  const occurrencesByRef = new Map<string, CandidateOccurrence[]>();
+  for (const action of snapshot.actions) {
+    if (!action.conceptRef || !ACCEPTED_RESOLVED.has(action.resolvedAs ?? "")) {
+      continue;
+    }
+    const list = occurrencesByRef.get(action.conceptRef) ?? [];
+    const occurredAt = sessionOccurredAt?.[action.sessionId] ?? "";
+    const key = `${action.sessionId}:${action.evidenceRef}`;
+    if (list.some((item) => `${item.sessionId}:${item.evidenceRef}` === key)) {
+      continue;
+    }
+    list.push({
+      sessionId: action.sessionId,
+      evidenceRef: action.evidenceRef,
+      occurredAt,
+      surfaceForm: action.surfaceForm,
+      matchKind: action.matchKind,
+      resolvedAs: action.resolvedAs ?? "new",
+    });
+    occurrencesByRef.set(action.conceptRef, list);
+  }
+  const sorted = new Map<string, CandidateOccurrence[]>();
+  for (const [ref, list] of occurrencesByRef) {
+    sorted.set(ref, sortOccurrences(list));
+  }
+  return sorted;
+}
+
+export function intraCandidateDuplicateOccurrenceKeys(
+  snapshot: AdmissionPilotSnapshot,
+) {
+  const seen = new Set<string>();
+  const duplicates: string[] = [];
+  for (const action of snapshot.actions) {
+    if (!action.conceptRef || !ACCEPTED_RESOLVED.has(action.resolvedAs ?? "")) {
+      continue;
+    }
+    const key = `${action.conceptRef}:${action.sessionId}:${action.evidenceRef}`;
+    if (seen.has(key)) {
+      duplicates.push(key);
+    }
+    seen.add(key);
+  }
+  return duplicates;
+}
 
 export function unitTextKey(sessionId: string, evidenceRef: string) {
   return `${sessionId}:${evidenceRef}`;
@@ -86,30 +138,13 @@ export function buildAdmissionCandidates(
     seenRefs.add(row.ref);
   }
 
-  const occurrencesByRef = new Map<string, CandidateOccurrence[]>();
-  for (const action of input.snapshot.actions) {
-    if (!action.conceptRef || !ACCEPTED_RESOLVED.has(action.resolvedAs ?? "")) {
-      continue;
-    }
-    const list = occurrencesByRef.get(action.conceptRef) ?? [];
-    const occurredAt = input.sessionOccurredAt?.[action.sessionId] ?? "";
-    const key = `${action.sessionId}:${action.evidenceRef}`;
-    if (list.some((item) => `${item.sessionId}:${item.evidenceRef}` === key)) {
-      continue;
-    }
-    list.push({
-      sessionId: action.sessionId,
-      evidenceRef: action.evidenceRef,
-      occurredAt,
-      surfaceForm: action.surfaceForm,
-      matchKind: action.matchKind,
-      resolvedAs: action.resolvedAs ?? "new",
-    });
-    occurrencesByRef.set(action.conceptRef, list);
-  }
+  const occurrencesByRef = collectAdmissionOccurrences(
+    input.snapshot,
+    input.sessionOccurredAt,
+  );
 
   const candidates = input.snapshot.concepts.map((row) => {
-    const occurrences = sortOccurrences(occurrencesByRef.get(row.ref) ?? []);
+    const occurrences = occurrencesByRef.get(row.ref) ?? [];
     const sessionIds = uniqueSorted(occurrences.map((item) => item.sessionId));
     const occurredAts = occurrences
       .map((item) => item.occurredAt)

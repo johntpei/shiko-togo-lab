@@ -18,6 +18,8 @@ import { CONCEPT_MATCHING_VERSION } from "@/lib/concepts/types";
 
 type AppDb = ReturnType<typeof getDb>;
 
+export type ConceptQueryDb = AppDb;
+
 export type NewConceptInsert = {
   id: string;
   canonicalLabel: string;
@@ -204,4 +206,8 @@ export function insertConceptOccurrence(
 
 export function countConceptOccurrences(db: AppDb = getDb()) {
   return db.select().from(conceptOccurrences).all().length;
+}
+
+export function countConceptAliases(db: AppDb = getDb()) {
+  return db.select().from(conceptAliases).all().length;
 }

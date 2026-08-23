@@ -33,19 +33,43 @@ export function sessionIdsFromAdmissionSnapshot(
   return [...ids].sort((left, right) => left.localeCompare(right));
 }
 
-export function reconstructAdmissionUnitTexts(
+export type AdmissionProvenanceUnit = {
+  sessionId: string;
+  evidenceRef: string;
+  messageId: string;
+  text: string;
+};
+
+export function reconstructAdmissionProvenance(
   sessions: AdmissionEvidenceSession[],
 ) {
+  const units: Record<string, AdmissionProvenanceUnit> = {};
   const unitTexts: Record<string, string> = {};
   const sessionOccurredAt: Record<string, string> = {};
   for (const session of sessions) {
     sessionOccurredAt[session.sessionId] = session.occurredAt;
-    const units = prepareUserEvidenceUnits(session);
-    for (const unit of units) {
-      unitTexts[unitTextKey(unit.sessionId, unit.evidenceRef)] = unit.text;
+    for (const unit of prepareUserEvidenceUnits(session)) {
+      const key = unitTextKey(unit.sessionId, unit.evidenceRef);
+      units[key] = {
+        sessionId: unit.sessionId,
+        evidenceRef: unit.evidenceRef,
+        messageId: unit.messageId,
+        text: unit.text,
+      };
+      unitTexts[key] = unit.text;
     }
   }
-  return { unitTexts, sessionOccurredAt };
+  return { units, unitTexts, sessionOccurredAt };
+}
+
+export function reconstructAdmissionUnitTexts(
+  sessions: AdmissionEvidenceSession[],
+) {
+  const reconstructed = reconstructAdmissionProvenance(sessions);
+  return {
+    unitTexts: reconstructed.unitTexts,
+    sessionOccurredAt: reconstructed.sessionOccurredAt,
+  };
 }
 
 export function isResolvedAdmissionEvidence(

@@ -55,6 +55,8 @@ export type ConceptExtractOk = {
   resolve: ConceptResolveResult;
 };
 
+export type ConceptExtractActionsOk = Omit<ConceptExtractOk, "resolve">;
+
 export type ConceptExtractFail = {
   ok: false;
   sessionId: string;
@@ -112,10 +114,22 @@ function coverageError(reason: string, detail: string) {
   return `Evidence Unit coverage が不完全です (${reason}: ${detail})`;
 }
 
-export async function runConceptExtractSession(
-  input: ConceptExtractSessionInput,
+export type ConceptExtractActionsResult =
+  | ConceptExtractActionsOk
+  | ConceptExtractFail;
+
+/**
+ * Frozen Extraction v4 LLM path。units は caller が用意する。
+ * Identity Resolution は行わない。
+ */
+export async function runConceptExtractOnUnits(
+  input: {
+    sessionId: string;
+    units: ConceptExtractUnit[];
+    catalog?: ConceptRegistrySnapshot;
+  },
   deps: ConceptExtractDeps,
-): Promise<ConceptExtractResult> {
+): Promise<ConceptExtractActionsResult> {
   const config = getAiConfig();
   if (!config.apiKey) {
     return {
@@ -144,11 +158,7 @@ export async function runConceptExtractSession(
   }
 
   const catalog = input.catalog ?? emptyConceptCatalog();
-  const units = prepareUserEvidenceUnits({
-    sessionId: input.sessionId,
-    occurredAt: input.occurredAt,
-    messages: input.messages,
-  });
+  const units = input.units;
 
   if (units.length === 0) {
     return {
@@ -162,7 +172,6 @@ export async function runConceptExtractSession(
       repaired: false,
       units,
       actions: [],
-      resolve: resolveConceptActions({ units, catalog, actions: [] }),
     };
   }
 
@@ -262,9 +271,6 @@ export async function runConceptExtractSession(
     repaired = true;
   }
 
-  const actions = toExtractActions(output);
-  const resolve = resolveConceptActions({ units, catalog, actions });
-
   return {
     ok: true,
     sessionId: input.sessionId,
@@ -275,8 +281,34 @@ export async function runConceptExtractSession(
     retryCalls,
     repaired,
     units,
-    actions,
-    resolve,
+    actions: toExtractActions(output),
+  };
+}
+
+export async function runConceptExtractSession(
+  input: ConceptExtractSessionInput,
+  deps: ConceptExtractDeps,
+): Promise<ConceptExtractResult> {
+  const catalog = input.catalog ?? emptyConceptCatalog();
+  const units = prepareUserEvidenceUnits({
+    sessionId: input.sessionId,
+    occurredAt: input.occurredAt,
+    messages: input.messages,
+  });
+  const extracted = await runConceptExtractOnUnits(
+    { sessionId: input.sessionId, units, catalog },
+    deps,
+  );
+  if (!extracted.ok) {
+    return extracted;
+  }
+  return {
+    ...extracted,
+    resolve: resolveConceptActions({
+      units: extracted.units,
+      catalog,
+      actions: extracted.actions,
+    }),
   };
 }
 

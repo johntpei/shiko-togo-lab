@@ -44,6 +44,10 @@ yarn-error.log*
 /data/concept-admission-pilot*.json
 /data/concept-admission-assessment*.json
 /data/concept-admission-calibration*.json
+/data/concept-admission-policy-eval*.json
+/data/concept-admission-apply*.json
+/data/concept-admission-preflight*.json
+/data/concept-incremental*.json
 
 # ChatGPT Export / personal transcripts
 conversations-*.json
