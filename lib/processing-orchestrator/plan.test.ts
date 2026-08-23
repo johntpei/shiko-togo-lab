@@ -792,7 +792,7 @@ test("candidate coverage helper matches eligibility loader", () => {
 test("code facts recommend explicit dual-pipeline orchestrator executor", () => {
   assert.equal(
     DUAL_PIPELINE_ORCHESTRATOR_CODE_FACTS.recommendedNextStep,
-    "explicit_dual_pipeline_orchestrator_executor",
+    "processing_ui_explicit_process_action",
   );
   assert.equal(
     DUAL_PIPELINE_ORCHESTRATOR_CODE_FACTS.recommendedStageOrder,

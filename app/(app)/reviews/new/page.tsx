@@ -10,7 +10,7 @@ import {
 } from "@/lib/sessions/labels";
 
 export const metadata = {
-  title: "統合レビュー",
+  title: "観測を更新する",
 };
 
 export const dynamic = "force-dynamic";
@@ -43,13 +43,13 @@ export default async function NewReviewPage({
   return (
     <div className="mx-auto max-w-3xl px-5 py-10 sm:px-8 sm:py-14">
       <p className="text-xs font-bold tracking-[0.18em] text-blue-600">
-        NEW REVIEW
+        OBSERVATION UPDATE
       </p>
       <h1 className="mt-2 text-2xl font-black tracking-tight text-ink sm:text-3xl">
-        統合レビュー
+        観測を更新する
       </h1>
       <p className="mt-3 text-sm leading-7 text-muted">
-        複数の Session を選び、対話の間にあるつながりを見つけます。新規レビューは integrated-review-v5 です。過去の v1〜v4 レビューはそのまま残ります。期間や検索は候補を探すためで、Review対象はチェックで決めます。実行はボタンを押したときだけです。
+        選んだ対話から、テーマの観測と対話をまたいだ観測を更新できます。実行内容は確認してから始められます。下の「統合レビューのみ実行」は、レビューだけを行う従来の操作です。期間や検索は候補を探すためで、対象はチェックで決めます。
       </p>
       <ReviewSessionPicker
         candidates={candidates}

@@ -6,6 +6,7 @@ import {
   createIntegratedReviewAction,
   type CreateReviewState,
 } from "@/app/(app)/reviews/actions";
+import { ProcessingPanel } from "@/components/app/processing-panel";
 import { INTEGRATED_REVIEW_MAX_INPUT_CHARS } from "@/lib/ai/limits";
 import {
   canRunIntegratedReviewSelection,
@@ -84,12 +85,7 @@ export function ReviewSessionPicker({
     canRunIntegratedReviewSelection(selectedCount, overLimit);
 
   return (
-    <form action={formAction} className="mt-8 grid gap-5">
-      <input type="hidden" name="preset" value={preset} />
-      {[...selected].map((id) => (
-        <input key={id} type="hidden" name="sessionIds" value={id} />
-      ))}
-
+    <div className="mt-8 grid gap-5">
       <div>
         <p className="text-[11px] font-bold text-muted">期間・検索・カテゴリで探す</p>
         <div className="mt-2 flex flex-wrap gap-2">
@@ -137,6 +133,12 @@ export function ReviewSessionPicker({
           </select>
         </label>
       </div>
+
+      <ProcessingPanel
+        selectedSessionIds={[...selected]}
+        aiReady={aiReady}
+        aiMessage={aiMessage}
+      />
 
       <div className="rounded-2xl border border-line bg-white px-4 py-3 text-sm">
         <p className="font-bold text-ink">選択中：{selectedCount} Session</p>
@@ -260,7 +262,12 @@ export function ReviewSessionPicker({
         </ul>
       )}
 
-      <div className="sticky bottom-4 rounded-2xl border border-line bg-white p-4 shadow-[0_12px_40px_-30px_rgba(15,23,42,0.45)]">
+      <form action={formAction} className="sticky bottom-4 rounded-2xl border border-line bg-white p-4 shadow-[0_12px_40px_-30px_rgba(15,23,42,0.45)]">
+        <input type="hidden" name="preset" value={preset} />
+        {[...selected].map((id) => (
+          <input key={id} type="hidden" name="sessionIds" value={id} />
+        ))}
+        <p className="text-[11px] font-bold text-muted">統合レビューのみ実行</p>
         {!aiReady ? (
           <p className="text-sm font-bold text-amber-800">
             {aiMessage ?? "OpenAI APIキーが設定されていません"}
@@ -287,7 +294,7 @@ export function ReviewSessionPicker({
         {state.error ? (
           <p className="mt-2 text-xs font-bold text-rose-700">{state.error}</p>
         ) : null}
-      </div>
-    </form>
+      </form>
+    </div>
   );
 }

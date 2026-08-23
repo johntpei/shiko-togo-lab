@@ -5,6 +5,8 @@ import {
   type ConceptSessionPlanRow,
   type DualPipelineOrchestratorPlan,
   type DualPipelineOrchestratorPlanInput,
+  type ReviewSelectionState,
+  type ReviewStageAction,
 } from "./types";
 
 export function uniqueSortedSessionIds(ids: readonly string[]) {
@@ -34,6 +36,107 @@ function conceptRowFromEvaluation(
     sessionId: evaluation.sessionId,
     state: "blocked",
     reason: evaluation.reason ?? "blocked",
+  };
+}
+
+export type ResolvedReviewStage = {
+  action: ReviewStageAction;
+  executionReady: boolean;
+  blockingReason: string | null;
+  selectionSessionIds: string[];
+  exactCompletedReviewIds: string[];
+  exactPendingReviewIds: string[];
+  exactLegacyUnknownReviewIds: string[];
+  resumeReviewId: string | null;
+};
+
+export function resolveReviewStageAction(input: {
+  requestedSessionIds: readonly string[];
+  validSessionIds: readonly string[];
+  reviewSelectionState: ReviewSelectionState;
+}): ResolvedReviewStage {
+  const requestedSessionIds = uniqueSortedSessionIds(input.requestedSessionIds);
+  const validSessionIds = uniqueSortedSessionIds(input.validSessionIds);
+  const selectionState = input.reviewSelectionState;
+  const exactCompletedReviewIds = [
+    ...selectionState.exactCompletedReviewIds,
+  ].sort((left, right) => left.localeCompare(right));
+  const exactPendingReviewIds = [...selectionState.exactPendingReviewIds].sort(
+    (left, right) => left.localeCompare(right),
+  );
+  const exactLegacyUnknownReviewIds = [
+    ...selectionState.exactLegacyUnknownReviewIds,
+  ].sort((left, right) => left.localeCompare(right));
+
+  const review = (() => {
+    if (requestedSessionIds.length === 0) {
+      return {
+        action: "no_selection" as const,
+        executionReady: false,
+        blockingReason: "no_selection",
+      };
+    }
+    if (validSessionIds.length === 0) {
+      return {
+        action: "no_valid_session" as const,
+        executionReady: false,
+        blockingReason: "missing_session",
+      };
+    }
+    if (validSessionIds.length < MIN_INTEGRATED_REVIEW_SESSIONS) {
+      return {
+        action: "blocked" as const,
+        executionReady: false,
+        blockingReason: "review_requires_at_least_two_sessions",
+      };
+    }
+    if (exactCompletedReviewIds.length > 0) {
+      return {
+        action: "not_needed" as const,
+        executionReady: false,
+        blockingReason: null,
+      };
+    }
+    if (exactPendingReviewIds.length > 1) {
+      return {
+        action: "blocked" as const,
+        executionReady: false,
+        blockingReason: "ambiguous_pending_reviews",
+      };
+    }
+    if (exactPendingReviewIds.length === 1) {
+      return {
+        action: "resume_projection" as const,
+        executionReady: true,
+        blockingReason: null,
+      };
+    }
+    if (exactLegacyUnknownReviewIds.length > 0) {
+      return {
+        action: "blocked" as const,
+        executionReady: false,
+        blockingReason: "legacy_review_completion_unknown",
+      };
+    }
+    return {
+      action: "run_for_selection" as const,
+      executionReady: true,
+      blockingReason: null,
+    };
+  })();
+
+  return {
+    action: review.action,
+    executionReady: review.executionReady,
+    blockingReason: review.blockingReason,
+    selectionSessionIds: validSessionIds,
+    exactCompletedReviewIds,
+    exactPendingReviewIds,
+    exactLegacyUnknownReviewIds,
+    resumeReviewId:
+      review.action === "resume_projection"
+        ? (exactPendingReviewIds[0] ?? null)
+        : null,
   };
 }
 
@@ -134,73 +237,11 @@ export function buildDualPipelineOrchestratorPlan(
     (id) => !reviewCoveredSet.has(id),
   );
 
-  const selectionState = input.reviewSelectionState;
-  const exactCompletedReviewIds = [
-    ...selectionState.exactCompletedReviewIds,
-  ].sort((left, right) => left.localeCompare(right));
-  const exactPendingReviewIds = [...selectionState.exactPendingReviewIds].sort(
-    (left, right) => left.localeCompare(right),
-  );
-  const exactLegacyUnknownReviewIds = [
-    ...selectionState.exactLegacyUnknownReviewIds,
-  ].sort((left, right) => left.localeCompare(right));
-
-  const review = (() => {
-    if (requestedSessionIds.length === 0) {
-      return {
-        action: "no_selection" as const,
-        executionReady: false,
-        blockingReason: "no_selection",
-      };
-    }
-    if (validSessionIds.length === 0) {
-      return {
-        action: "no_valid_session" as const,
-        executionReady: false,
-        blockingReason: "missing_session",
-      };
-    }
-    if (validSessionIds.length < MIN_INTEGRATED_REVIEW_SESSIONS) {
-      return {
-        action: "blocked" as const,
-        executionReady: false,
-        blockingReason: "review_requires_at_least_two_sessions",
-      };
-    }
-    if (exactCompletedReviewIds.length > 0) {
-      return {
-        action: "not_needed" as const,
-        executionReady: false,
-        blockingReason: null,
-      };
-    }
-    if (exactPendingReviewIds.length > 1) {
-      return {
-        action: "blocked" as const,
-        executionReady: false,
-        blockingReason: "ambiguous_pending_reviews",
-      };
-    }
-    if (exactPendingReviewIds.length === 1) {
-      return {
-        action: "resume_projection" as const,
-        executionReady: true,
-        blockingReason: null,
-      };
-    }
-    if (exactLegacyUnknownReviewIds.length > 0) {
-      return {
-        action: "blocked" as const,
-        executionReady: false,
-        blockingReason: "legacy_review_completion_unknown",
-      };
-    }
-    return {
-      action: "run_for_selection" as const,
-      executionReady: true,
-      blockingReason: null,
-    };
-  })();
+  const resolvedReview = resolveReviewStageAction({
+    requestedSessionIds,
+    validSessionIds,
+    reviewSelectionState: input.reviewSelectionState,
+  });
 
   return {
     version: DUAL_PIPELINE_ORCHESTRATOR_PLAN_VERSION,
@@ -221,13 +262,13 @@ export function buildDualPipelineOrchestratorPlan(
       sessions: conceptSessions,
     },
     review: {
-      action: review.action,
-      executionReady: review.executionReady,
-      blockingReason: review.blockingReason,
-      selectionSessionIds: validSessionIds,
-      exactCompletedReviewIds,
-      exactPendingReviewIds,
-      exactLegacyUnknownReviewIds,
+      action: resolvedReview.action,
+      executionReady: resolvedReview.executionReady,
+      blockingReason: resolvedReview.blockingReason,
+      selectionSessionIds: resolvedReview.selectionSessionIds,
+      exactCompletedReviewIds: resolvedReview.exactCompletedReviewIds,
+      exactPendingReviewIds: resolvedReview.exactPendingReviewIds,
+      exactLegacyUnknownReviewIds: resolvedReview.exactLegacyUnknownReviewIds,
       coveredSessionIds: reviewCoveredSessionIds,
       uncoveredSessionIds: reviewUncoveredSessionIds,
     },
@@ -239,9 +280,9 @@ export function buildDualPipelineOrchestratorPlan(
       conceptExtractionCallsKnown: needsProcessingSessionIds.length,
       conceptAssessmentCalls: "unknown_until_extraction",
       reviewCallsKnown:
-        review.action === "run_for_selection"
+        resolvedReview.action === "run_for_selection"
           ? 1
-          : review.action === "resume_projection"
+          : resolvedReview.action === "resume_projection"
             ? 0
             : 0,
     },

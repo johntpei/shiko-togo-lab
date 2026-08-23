@@ -9,7 +9,7 @@ export const CONCEPT_EXECUTION_READINESS = "unified_session_processor_ready" as 
 export const REVIEW_PRODUCTION_ENTRY = "createIntegratedReviewAction" as const;
 
 export const RECOMMENDED_NEXT_STEP =
-  "explicit_dual_pipeline_orchestrator_executor" as const;
+  "processing_ui_explicit_process_action" as const;
 
 /**
  * Code-path facts. Not inferred from Session counts.
