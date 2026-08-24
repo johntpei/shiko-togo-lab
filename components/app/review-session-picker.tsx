@@ -262,21 +262,24 @@ export function ReviewSessionPicker({
         </ul>
       )}
 
-      <form action={formAction} className="sticky bottom-4 rounded-2xl border border-line bg-white p-4 shadow-[0_12px_40px_-30px_rgba(15,23,42,0.45)]">
+      <form action={formAction} className="rounded-2xl border border-line bg-white p-4">
         <input type="hidden" name="preset" value={preset} />
         {[...selected].map((id) => (
           <input key={id} type="hidden" name="sessionIds" value={id} />
         ))}
         <p className="text-[11px] font-bold text-muted">統合レビューのみ実行</p>
+        <p className="mt-2 text-sm leading-6 text-muted">
+          観測全体を更新せず、選んだ対話の統合レビューだけを作成します。
+        </p>
         {!aiReady ? (
-          <p className="text-sm font-bold text-amber-800">
+          <p className="mt-3 text-sm font-bold text-amber-800">
             {aiMessage ?? "OpenAI APIキーが設定されていません"}
           </p>
         ) : (
           <button
             type="submit"
             disabled={!canSubmit}
-            className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            className="mt-3 inline-flex items-center gap-2 rounded-xl border border-line bg-white px-4 py-2.5 text-sm font-bold text-ink hover:border-blue-200 hover:bg-brand-soft disabled:cursor-not-allowed disabled:opacity-50"
           >
             {pending ? (
               <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />

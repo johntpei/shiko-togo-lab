@@ -60,7 +60,9 @@ export function ProcessingPanel({
       </p>
 
       {selectedSessionIds.length === 0 ? (
-        <p className="mt-4 text-sm text-muted">対話を1件以上選ぶと確認できます。</p>
+        <p className="mt-4 text-sm text-muted">
+          対話を1件以上選ぶと、実行内容を確認して観測を更新できます。
+        </p>
       ) : (
         <>
           <form action={loadPlanAction} className="mt-4">
@@ -103,7 +105,10 @@ export function ProcessingPanel({
               </div>
               <div>
                 <p className="text-xs font-bold text-muted">対話をまたいだ観測</p>
-                <p className="mt-1 font-bold text-ink">{freshPlan.review.summary}</p>
+                <p className="mt-1 text-xs leading-5 text-muted">
+                  選んだ複数の対話をまとめて見たときの変化やつながりを観測します。
+                </p>
+                <p className="mt-2 font-bold text-ink">{freshPlan.review.summary}</p>
                 {freshPlan.review.detail ? (
                   <p className="mt-1 text-xs text-muted">{freshPlan.review.detail}</p>
                 ) : null}
