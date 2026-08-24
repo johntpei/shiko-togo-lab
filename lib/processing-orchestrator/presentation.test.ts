@@ -157,6 +157,7 @@ test("execution presentation maps projection_failed recovery hint", () => {
           executionMode: "fresh",
           extractionCalls: 1,
           assessmentCalls: 0,
+          failureDiagnostic: null,
         },
       ],
     },
@@ -187,7 +188,7 @@ test("execution presentation maps projection_failed recovery hint", () => {
   assert.doesNotMatch(JSON.stringify(presentation), /partial_primary_commit/);
 });
 
-test("execution presentation avoids raw technical codes in JSON", () => {
+test("execution presentation preserves sanitized Concept failure diagnostics only", () => {
   const result: DualPipelineOrchestratorExecutionResult = {
     version: DUAL_PIPELINE_ORCHESTRATOR_EXECUTION_VERSION,
     status: "partial",
@@ -204,10 +205,17 @@ test("execution presentation avoids raw technical codes in JSON", () => {
           planState: "needs_processing",
           planReason: "not_covered",
           processorStatus: "failed",
-          processorReason: "checkpoint_failed",
+          processorReason: "SECRET_USER_MESSAGE presentation fixture",
           executionMode: "fresh",
           extractionCalls: 1,
           assessmentCalls: 0,
+          failureDiagnostic: {
+            failureStage: "checkpoint",
+            failureReason: "checkpoint_failed",
+            failureCode: "injected_checkpoint_failure",
+            extractionCalls: 1,
+            assessmentCalls: 0,
+          },
         },
       ],
     },
@@ -232,6 +240,97 @@ test("execution presentation avoids raw technical codes in JSON", () => {
       reviewLlmCalls: 0,
     },
   };
-  const serialized = JSON.stringify(buildProcessingExecutionPresentation(result));
-  assert.doesNotMatch(serialized, /checkpoint_failed/);
+  const presentation = buildProcessingExecutionPresentation(
+    result,
+    new Map([["s-a", "Session A"]]),
+  );
+  assert.deepEqual(presentation.conceptFailures, [
+    {
+      sessionId: "s-a",
+      title: "Session A",
+      status: "failed",
+      executionMode: "fresh",
+      failureStage: "checkpoint",
+      failureReason: "checkpoint_failed",
+      failureCode: "injected_checkpoint_failure",
+      extractionCalls: 1,
+      assessmentCalls: 0,
+    },
+  ]);
+  const serialized = JSON.stringify(presentation);
+  assert.doesNotMatch(serialized, /SECRET_USER_MESSAGE/);
+  assert.doesNotMatch(serialized, /processorReason/);
+});
+
+test("execution presentation keeps unknown Concept diagnostics null", () => {
+  const result: DualPipelineOrchestratorExecutionResult = {
+    version: DUAL_PIPELINE_ORCHESTRATOR_EXECUTION_VERSION,
+    status: "partial",
+    reason: null,
+    planVersion: "dual-pipeline-orchestrator-plan-v0",
+    operationalOrder: "concept_then_review",
+    semanticDependency: "none",
+    selection: {
+      sessionIds: ["s-a"],
+      validSessionIds: ["s-a"],
+      invalidSessionIds: [],
+    },
+    concept: {
+      sessions: [
+        {
+          sessionId: "s-a",
+          action: "executed",
+          planState: "needs_processing",
+          planReason: "not_covered",
+          processorStatus: "failed",
+          processorReason: null,
+          executionMode: "fresh",
+          extractionCalls: 1,
+          assessmentCalls: 0,
+          failureDiagnostic: {
+            failureStage: null,
+            failureReason: null,
+            failureCode: null,
+            extractionCalls: 1,
+            assessmentCalls: 0,
+          },
+        },
+      ],
+    },
+    review: {
+      action: "blocked",
+      resolvedAction: "blocked",
+      blockingReason: "review_requires_at_least_two_sessions",
+      reviewId: null,
+      processorStatus: null,
+      processorReason: null,
+      executionMode: null,
+      llmCalls: 0,
+      projectionStatus: null,
+      observationCount: 0,
+    },
+    summary: {
+      conceptExecutedCount: 1,
+      conceptCompletedCount: 0,
+      conceptFailedCount: 1,
+      conceptExtractionCalls: 1,
+      conceptAssessmentCalls: 0,
+      reviewLlmCalls: 0,
+    },
+  };
+
+  assert.deepEqual(
+    buildProcessingExecutionPresentation(result).conceptFailures[0],
+    {
+      sessionId: "s-a",
+      title: null,
+      status: "failed",
+      executionMode: "fresh",
+      failureStage: null,
+      failureReason: null,
+      failureCode: null,
+      extractionCalls: 1,
+      assessmentCalls: 0,
+    },
+  );
 });

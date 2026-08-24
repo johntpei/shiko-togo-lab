@@ -46,6 +46,19 @@ export type ProcessingExecutionPresentation = {
   conceptSummary: string | null;
   reviewSummary: string | null;
   status: DualPipelineOrchestratorExecutionResult["status"];
+  conceptFailures: ProcessingConceptFailurePresentation[];
+};
+
+export type ProcessingConceptFailurePresentation = {
+  sessionId: string;
+  title: string | null;
+  status: "blocked" | "failed";
+  executionMode: "fresh" | "resumed" | null;
+  failureStage: string | null;
+  failureReason: string | null;
+  failureCode: string | null;
+  extractionCalls: number;
+  assessmentCalls: number;
 };
 
 function selectionKey(sessionIds: readonly string[]) {
@@ -235,6 +248,24 @@ export function buildProcessingExecutionPresentation(
       (row.action === "not_needed" && row.planState === "covered"),
   ).length;
   const conceptFailed = result.summary.conceptFailedCount;
+  const conceptFailures: ProcessingConceptFailurePresentation[] =
+    result.concept.sessions.flatMap((row) => {
+      if (
+        !row.failureDiagnostic ||
+        (row.processorStatus !== "blocked" && row.processorStatus !== "failed")
+      ) {
+        return [];
+      }
+      return [
+        {
+          sessionId: row.sessionId,
+          title: sessionTitles?.get(row.sessionId) ?? null,
+          status: row.processorStatus,
+          executionMode: row.executionMode,
+          ...row.failureDiagnostic,
+        },
+      ];
+    });
 
   let conceptSummary: string | null = null;
   if (conceptExecuted > 0) {
@@ -290,7 +321,6 @@ export function buildProcessingExecutionPresentation(
     recoveryHint = null;
   }
 
-  void sessionTitles;
   return {
     headline,
     detail,
@@ -298,6 +328,7 @@ export function buildProcessingExecutionPresentation(
     conceptSummary,
     reviewSummary,
     status: result.status,
+    conceptFailures,
   };
 }
 

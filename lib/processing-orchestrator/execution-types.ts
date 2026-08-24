@@ -16,6 +16,14 @@ export type DualPipelineExecutionStatus =
 
 export type DualPipelineConceptSessionAction = "not_needed" | "executed";
 
+export type DualPipelineConceptFailureDiagnostic = {
+  failureStage: string | null;
+  failureReason: string | null;
+  failureCode: string | null;
+  extractionCalls: number;
+  assessmentCalls: number;
+};
+
 export type DualPipelineConceptSessionResult = {
   sessionId: string;
   action: DualPipelineConceptSessionAction;
@@ -26,6 +34,7 @@ export type DualPipelineConceptSessionResult = {
   executionMode: IncrementalConceptSessionProcessorResult["executionMode"];
   extractionCalls: number;
   assessmentCalls: number;
+  failureDiagnostic: DualPipelineConceptFailureDiagnostic | null;
 };
 
 export type DualPipelineReviewExecutionResult = {

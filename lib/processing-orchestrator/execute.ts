@@ -32,6 +32,7 @@ import {
 } from "./types";
 
 const DEFAULT_REVIEW_TITLE = "dual-pipeline-integrated-review";
+const SAFE_DIAGNOSTIC_TOKEN = /^[a-z][A-Za-z0-9_]{0,127}$/;
 
 export type ExecuteDualPipelineProcessingInput = {
   sessionIds: readonly string[];
@@ -136,14 +137,49 @@ function summarizeConceptProcessor(
   | "executionMode"
   | "extractionCalls"
   | "assessmentCalls"
+  | "failureDiagnostic"
 > {
+  const failed = result.status === "blocked" || result.status === "failed";
+  const failureStage = failed
+    ? sanitizeDiagnosticToken(result.stageOrder.at(-1) ?? null)
+    : null;
+
   return {
     processorStatus: result.status,
     processorReason: result.reason,
     executionMode: result.executionMode,
     extractionCalls: result.extractionCalls,
     assessmentCalls: result.assessmentCalls,
+    failureDiagnostic: failed
+      ? {
+          failureStage,
+          failureReason: sanitizeDiagnosticToken(result.reason),
+          failureCode: failureCodeForStage(result, failureStage),
+          extractionCalls: result.extractionCalls,
+          assessmentCalls: result.assessmentCalls,
+        }
+      : null,
   };
+}
+
+function sanitizeDiagnosticToken(value: string | null): string | null {
+  return value && SAFE_DIAGNOSTIC_TOKEN.test(value) ? value : null;
+}
+
+function failureCodeForStage(
+  result: IncrementalConceptSessionProcessorResult,
+  failureStage: string | null,
+): string | null {
+  if (failureStage === "existing_primary") {
+    return sanitizeDiagnosticToken(result.existingPrimary.code);
+  }
+  if (failureStage === "new_primary") {
+    return sanitizeDiagnosticToken(result.newPrimary.code);
+  }
+  if (failureStage === "checkpoint") {
+    return sanitizeDiagnosticToken(result.checkpoint.code);
+  }
+  return null;
 }
 
 function isConceptSuccess(result: DualPipelineConceptSessionResult) {
@@ -323,6 +359,7 @@ export async function executeDualPipelineProcessing(
         executionMode: null,
         extractionCalls: 0,
         assessmentCalls: 0,
+        failureDiagnostic: null,
       });
       continue;
     }

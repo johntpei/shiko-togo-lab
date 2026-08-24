@@ -300,7 +300,20 @@ test("concept failure does not stop other concept sessions or review", async () 
       initialCoverage: coverageFor([]),
       processConceptSession: async (input) =>
         input.sessionId === "s-a"
-          ? conceptResult("s-a", "failed", { reason: "partial_primary_commit" })
+          ? conceptResult("s-a", "failed", {
+              reason: "fixture_reason",
+              executionMode: "fresh",
+              extractionCalls: 1,
+              assessmentCalls: 0,
+              stageOrder: ["eligibility", "extraction", "new_primary"],
+              newPrimary: {
+                status: "failed",
+                conceptsCreated: 0,
+                occurrencesCreated: 0,
+                aliasesCreated: 0,
+                code: "fixture_code",
+              },
+            })
           : conceptResult("s-b", "completed"),
       processReviewSelection: async () => {
         reviewCalls += 1;
@@ -309,10 +322,44 @@ test("concept failure does not stop other concept sessions or review", async () 
     },
   );
   assert.equal(result.status, "partial");
-  assert.equal(result.concept.sessions[0]?.processorReason, "partial_primary_commit");
+  assert.equal(result.concept.sessions[0]?.processorReason, "fixture_reason");
+  assert.deepEqual(result.concept.sessions[0]?.failureDiagnostic, {
+    failureStage: "new_primary",
+    failureReason: "fixture_reason",
+    failureCode: "fixture_code",
+    extractionCalls: 1,
+    assessmentCalls: 0,
+  });
   assert.equal(result.concept.sessions[1]?.processorStatus, "completed");
+  assert.equal(result.concept.sessions[1]?.failureDiagnostic, null);
   assert.equal(reviewCalls, 1);
   assert.equal(result.review.processorStatus, "completed");
+});
+
+test("concept failure diagnostics do not invent or expose unsafe tokens", async () => {
+  const db = openMemoryDb();
+  seedSession(db, "s-a");
+  const result = await executeDualPipelineProcessing(
+    { sessionIds: ["s-a"] },
+    {
+      db,
+      initialCoverage: coverageFor([]),
+      processConceptSession: async () =>
+        conceptResult("s-a", "failed", {
+          reason: USER_QUOTE,
+          extractionCalls: 1,
+          stageOrder: [],
+        }),
+    },
+  );
+
+  assert.deepEqual(result.concept.sessions[0]?.failureDiagnostic, {
+    failureStage: null,
+    failureReason: null,
+    failureCode: null,
+    extractionCalls: 1,
+    assessmentCalls: 0,
+  });
 });
 
 test("one session executes concept and blocks review minimum", async () => {

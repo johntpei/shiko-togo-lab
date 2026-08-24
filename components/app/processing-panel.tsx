@@ -178,6 +178,47 @@ export function ProcessingPanel({
               {executeState.result.recoveryHint}
             </p>
           ) : null}
+          {executeState.result.conceptFailures.length > 0 ? (
+            <div className="mt-3 border-t border-emerald-200 pt-3 text-xs text-emerald-950/80">
+              <p className="font-bold">未完了のテーマの観測</p>
+              <ul className="mt-2 grid gap-2">
+                {executeState.result.conceptFailures.map((failure) => (
+                  <li key={failure.sessionId}>
+                    <p>
+                      {failure.title ?? "選択した対話"} — 処理段階:{" "}
+                      {failure.failureStage ?? "特定できません"}
+                    </p>
+                    <details className="mt-1">
+                      <summary className="cursor-pointer font-bold">
+                        処理診断を確認
+                      </summary>
+                      <dl className="mt-1 grid gap-1 pl-3">
+                        {failure.failureReason ? (
+                          <div>
+                            <dt className="inline font-bold">理由: </dt>
+                            <dd className="inline">{failure.failureReason}</dd>
+                          </div>
+                        ) : null}
+                        {failure.failureCode ? (
+                          <div>
+                            <dt className="inline font-bold">コード: </dt>
+                            <dd className="inline">{failure.failureCode}</dd>
+                          </div>
+                        ) : null}
+                        <div>
+                          <dt className="inline font-bold">呼び出し回数: </dt>
+                          <dd className="inline">
+                            抽出 {failure.extractionCalls} / 判定{" "}
+                            {failure.assessmentCalls}
+                          </dd>
+                        </div>
+                      </dl>
+                    </details>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           <p className="mt-3 text-xs text-emerald-900/70">
             最新の状態を確認するには、もう一度「実行内容を確認する」を押してください。
           </p>
