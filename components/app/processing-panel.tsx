@@ -219,6 +219,41 @@ export function ProcessingPanel({
               </ul>
             </div>
           ) : null}
+          {executeState.result.reviewFailure ? (
+            <div className="mt-3 border-t border-emerald-200 pt-3 text-xs text-emerald-950/80">
+              <p className="font-bold">未完了の対話をまたいだ観測</p>
+              <p className="mt-1">{executeState.result.reviewFailure.message}</p>
+              <details className="mt-2">
+                <summary className="cursor-pointer font-bold">
+                  処理診断を確認
+                </summary>
+                <dl className="mt-1 grid gap-1 pl-3">
+                  {executeState.result.reviewFailure.failureReason ? (
+                    <div>
+                      <dt className="inline font-bold">理由: </dt>
+                      <dd className="inline">
+                        {executeState.result.reviewFailure.failureReason}
+                      </dd>
+                    </div>
+                  ) : null}
+                  {executeState.result.reviewFailure.failureCode ? (
+                    <div>
+                      <dt className="inline font-bold">コード: </dt>
+                      <dd className="inline">
+                        {executeState.result.reviewFailure.failureCode}
+                      </dd>
+                    </div>
+                  ) : null}
+                  <div>
+                    <dt className="inline font-bold">AI呼び出し回数: </dt>
+                    <dd className="inline">
+                      {executeState.result.reviewFailure.llmCalls}
+                    </dd>
+                  </div>
+                </dl>
+              </details>
+            </div>
+          ) : null}
           <p className="mt-3 text-xs text-emerald-900/70">
             最新の状態を確認するには、もう一度「実行内容を確認する」を押してください。
           </p>

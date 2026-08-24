@@ -20,6 +20,7 @@ import {
   type DualPipelineExecutionStatus,
   type DualPipelineOrchestratorExecutionResult,
   type DualPipelineReviewExecutionResult,
+  sanitizeDualPipelineReviewFailureToken,
 } from "./execution-types";
 import {
   loadDualPipelineOrchestratorPlan,
@@ -120,10 +121,12 @@ function emptyReviewResult(
     reviewId: null,
     processorStatus: null,
     processorReason: null,
+    processorCode: null,
     executionMode: null,
     llmCalls: 0,
     projectionStatus: null,
     observationCount: 0,
+    failureDiagnostic: null,
     ...overrides,
   };
 }
@@ -179,7 +182,25 @@ function failureCodeForStage(
   if (failureStage === "checkpoint") {
     return sanitizeDiagnosticToken(result.checkpoint.code);
   }
+  if (failureStage === "planning") {
+    return sanitizeDiagnosticToken(result.planning.failureCode);
+  }
   return null;
+}
+
+function summarizeReviewFailure(
+  result: IntegratedReviewProcessingResult,
+): DualPipelineReviewExecutionResult["failureDiagnostic"] {
+  if (result.status === "completed") {
+    return null;
+  }
+  return {
+    status: result.status,
+    executionMode: result.executionMode,
+    failureReason: sanitizeDualPipelineReviewFailureToken(result.reason),
+    failureCode: sanitizeDualPipelineReviewFailureToken(result.code),
+    llmCalls: result.llmCalls,
+  };
 }
 
 function isConceptSuccess(result: DualPipelineConceptSessionResult) {
@@ -440,11 +461,13 @@ export async function executeDualPipelineProcessing(
       blockingReason: null,
       reviewId: processorResult.reviewId,
       processorStatus: processorResult.status,
-      processorReason: processorResult.reason ?? processorResult.code,
+      processorReason: processorResult.reason,
+      processorCode: processorResult.code,
       executionMode: processorResult.executionMode,
       llmCalls: processorResult.llmCalls,
       projectionStatus: processorResult.projection.status,
       observationCount: processorResult.projection.observationCount,
+      failureDiagnostic: summarizeReviewFailure(processorResult),
     };
   } else if (resolvedReview.action === "resume_projection") {
     const reviewId = resolvedReview.resumeReviewId;
@@ -464,11 +487,13 @@ export async function executeDualPipelineProcessing(
         blockingReason: null,
         reviewId: processorResult.reviewId,
         processorStatus: processorResult.status,
-        processorReason: processorResult.reason ?? processorResult.code,
+        processorReason: processorResult.reason,
+        processorCode: processorResult.code,
         executionMode: processorResult.executionMode,
         llmCalls: processorResult.llmCalls,
         projectionStatus: processorResult.projection.status,
         observationCount: processorResult.projection.observationCount,
+        failureDiagnostic: summarizeReviewFailure(processorResult),
       };
     }
   } else {

@@ -18,6 +18,27 @@ export class IncrementalExtractError extends Error {
   }
 }
 
+const SAFE_INCREMENTAL_EXTRACT_FAILURE_CODES = new Set([
+  "not_configured",
+  "unsupported_provider",
+  "too_long",
+  "api",
+  "timeout",
+  "schema",
+  "coverage",
+]);
+
+export function safeIncrementalExtractFailureCode(
+  error: unknown,
+): string | null {
+  if (!(error instanceof IncrementalExtractError)) {
+    return null;
+  }
+  return SAFE_INCREMENTAL_EXTRACT_FAILURE_CODES.has(error.code)
+    ? error.code
+    : null;
+}
+
 export type ProductionIncrementalExtractorDeps = ConceptExtractDeps & {
   conceptCatalog?: ConceptRegistrySnapshot;
 };

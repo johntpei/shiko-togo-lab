@@ -23,6 +23,7 @@ import {
 } from "./eligibility";
 import { ALL_ACTIONS_GROUNDING_REJECTED } from "./session-plan";
 import type { IncrementalCandidateExtractor } from "./session-plan";
+import { IncrementalExtractError } from "./extract";
 import {
   processIncrementalConceptSession,
   type ProcessIncrementalConceptSessionDeps,
@@ -363,6 +364,28 @@ test("D. candidate 0 → no_actions checkpoint", async () => {
   assert.equal(counts(db).occurrences, before.occurrences);
   assert.equal(counts(db).checkpoints, before.checkpoints + 1);
   assert.equal(result.retryAttempted, false);
+});
+
+test("D2. extractor safe code reaches planning diagnostics without raw error content", async () => {
+  const db = openMemoryDb();
+  seedCoveredAndEligible(db);
+  const before = counts(db);
+  const result = await runProcessor(db, {
+    extractCandidates: async () => {
+      throw new IncrementalExtractError(
+        "timeout",
+        "SECRET_USER raw provider response and stack fixture",
+      );
+    },
+  });
+  assert.equal(result.status, "blocked");
+  assert.equal(result.reason, "extractor_failed");
+  assert.equal(result.planning.failureCode, "timeout");
+  assert.equal(result.stageOrder.at(-1), "planning");
+  assert.equal(result.extractionCalls, 1);
+  assert.equal(result.assessmentCalls, 0);
+  assert.deepEqual(counts(db), before);
+  assertNoUserPayload(result);
 });
 
 test("E. existing only → append + checkpoint", async () => {

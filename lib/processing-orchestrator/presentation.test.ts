@@ -168,10 +168,18 @@ test("execution presentation maps projection_failed recovery hint", () => {
       reviewId: "r-1",
       processorStatus: "projection_failed",
       processorReason: "projection_failed",
+      processorCode: "projection_failed",
       executionMode: "fresh",
       llmCalls: 1,
       projectionStatus: "not_run",
       observationCount: 0,
+      failureDiagnostic: {
+        status: "projection_failed",
+        executionMode: "fresh",
+        failureReason: "projection_failed",
+        failureCode: "projection_failed",
+        llmCalls: 1,
+      },
     },
     summary: {
       conceptExecutedCount: 1,
@@ -226,10 +234,12 @@ test("execution presentation preserves sanitized Concept failure diagnostics onl
       reviewId: null,
       processorStatus: null,
       processorReason: null,
+      processorCode: null,
       executionMode: null,
       llmCalls: 0,
       projectionStatus: null,
       observationCount: 0,
+      failureDiagnostic: null,
     },
     summary: {
       conceptExecutedCount: 1,
@@ -304,10 +314,12 @@ test("execution presentation keeps unknown Concept diagnostics null", () => {
       reviewId: null,
       processorStatus: null,
       processorReason: null,
+      processorCode: null,
       executionMode: null,
       llmCalls: 0,
       projectionStatus: null,
       observationCount: 0,
+      failureDiagnostic: null,
     },
     summary: {
       conceptExecutedCount: 1,
@@ -333,4 +345,121 @@ test("execution presentation keeps unknown Concept diagnostics null", () => {
       assessmentCalls: 0,
     },
   );
+});
+
+test("execution presentation exposes safe Review too_long diagnostics with human copy", () => {
+  const result: DualPipelineOrchestratorExecutionResult = {
+    version: DUAL_PIPELINE_ORCHESTRATOR_EXECUTION_VERSION,
+    status: "partial",
+    reason: null,
+    planVersion: "dual-pipeline-orchestrator-plan-v0",
+    operationalOrder: "concept_then_review",
+    semanticDependency: "none",
+    selection: {
+      sessionIds: ["s-a", "s-b"],
+      validSessionIds: ["s-a", "s-b"],
+      invalidSessionIds: [],
+    },
+    concept: { sessions: [] },
+    review: {
+      action: "run_for_selection",
+      resolvedAction: "run_for_selection",
+      blockingReason: null,
+      reviewId: null,
+      processorStatus: "failed",
+      processorReason: "SECRET_USER raw provider body stack fixture",
+      processorCode: "too_long",
+      executionMode: "fresh",
+      llmCalls: 0,
+      projectionStatus: "not_run",
+      observationCount: 0,
+      failureDiagnostic: {
+        status: "failed",
+        executionMode: "fresh",
+        failureReason: null,
+        failureCode: "too_long",
+        llmCalls: 0,
+      },
+    },
+    summary: {
+      conceptExecutedCount: 0,
+      conceptCompletedCount: 0,
+      conceptFailedCount: 0,
+      conceptExtractionCalls: 0,
+      conceptAssessmentCalls: 0,
+      reviewLlmCalls: 0,
+    },
+  };
+
+  const presentation = buildProcessingExecutionPresentation(result);
+  assert.equal(
+    presentation.reviewSummary,
+    "対話をまたいだ観測: 完了できませんでした",
+  );
+  assert.deepEqual(presentation.reviewFailure, {
+    status: "failed",
+    executionMode: "fresh",
+    failureReason: null,
+    failureCode: "too_long",
+    llmCalls: 0,
+    message:
+      "選んだ対話の内容が長いため、対話をまたいだ観測を作成できませんでした。",
+  });
+  const serialized = JSON.stringify(presentation);
+  assert.doesNotMatch(serialized, /SECRET_USER/);
+  assert.doesNotMatch(serialized, /provider body/);
+  assert.doesNotMatch(serialized, /stack fixture/);
+
+  result.review.failureDiagnostic = {
+    status: "failed",
+    executionMode: "fresh",
+    failureReason: "secret_like_unknown_reason",
+    failureCode: "secret_like_unknown_code",
+    llmCalls: 0,
+  };
+  const unknown = buildProcessingExecutionPresentation(result);
+  assert.equal(unknown.reviewFailure?.failureReason, null);
+  assert.equal(unknown.reviewFailure?.failureCode, null);
+  assert.doesNotMatch(JSON.stringify(unknown), /secret_like_unknown/);
+});
+
+test("execution presentation omits Review failure diagnostics on success", () => {
+  const result: DualPipelineOrchestratorExecutionResult = {
+    version: DUAL_PIPELINE_ORCHESTRATOR_EXECUTION_VERSION,
+    status: "completed",
+    reason: null,
+    planVersion: "dual-pipeline-orchestrator-plan-v0",
+    operationalOrder: "concept_then_review",
+    semanticDependency: "none",
+    selection: {
+      sessionIds: ["s-a", "s-b"],
+      validSessionIds: ["s-a", "s-b"],
+      invalidSessionIds: [],
+    },
+    concept: { sessions: [] },
+    review: {
+      action: "run_for_selection",
+      resolvedAction: "run_for_selection",
+      blockingReason: null,
+      reviewId: "r-1",
+      processorStatus: "completed",
+      processorReason: null,
+      processorCode: null,
+      executionMode: "fresh",
+      llmCalls: 1,
+      projectionStatus: "projected",
+      observationCount: 0,
+      failureDiagnostic: null,
+    },
+    summary: {
+      conceptExecutedCount: 0,
+      conceptCompletedCount: 0,
+      conceptFailedCount: 0,
+      conceptExtractionCalls: 0,
+      conceptAssessmentCalls: 0,
+      reviewLlmCalls: 1,
+    },
+  };
+
+  assert.equal(buildProcessingExecutionPresentation(result).reviewFailure, null);
 });

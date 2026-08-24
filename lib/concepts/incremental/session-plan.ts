@@ -24,6 +24,7 @@ import {
   type IncrementalConceptPlan,
   type IncrementalGroundedCandidate,
 } from "./plan";
+import { safeIncrementalExtractFailureCode } from "./extract";
 import { loadConceptRegistrySnapshot } from "./registry";
 
 /**
@@ -98,6 +99,7 @@ export type IncrementalSessionPlanResult =
       status: "blocked";
       sessionId: string;
       code: string;
+      failureCode: string | null;
       detail: string;
       userEvidenceUnits: number;
       adapterActions: number;
@@ -134,6 +136,7 @@ function blocked(
     groundingRejectedCount?: number;
     groundingRejections?: SurfaceNotInUnitDiagnostic[];
     groundingFailure?: SurfaceNotInUnitDiagnostic | null;
+    failureCode?: string | null;
   } = {},
 ): IncrementalSessionPlanResult {
   const rejections = extra.groundingRejections ?? [];
@@ -141,6 +144,7 @@ function blocked(
     status: "blocked",
     sessionId,
     code,
+    failureCode: extra.failureCode ?? null,
     detail,
     userEvidenceUnits,
     adapterActions: extra.adapterActions ?? 0,
@@ -448,6 +452,7 @@ export async function planIncrementalSession(input: {
       "extractor_failed",
       error instanceof Error ? error.message : String(error),
       units.length,
+      { failureCode: safeIncrementalExtractFailureCode(error) },
     );
   }
 

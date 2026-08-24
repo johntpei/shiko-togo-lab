@@ -15,6 +15,7 @@ import {
 import * as schema from "@/lib/db/schema";
 import { CONCEPT_EXTRACTION_VERSION } from "@/lib/concepts/types";
 import { stableIncrementalPlan } from "./plan";
+import { IncrementalExtractError } from "./extract";
 import type { ConceptExtractUnit } from "@/lib/concepts/user-units";
 import {
   ALL_ACTIONS_GROUNDING_REJECTED,
@@ -415,6 +416,48 @@ test("H. invalid grounding は blocked", async () => {
       JSON.stringify(result.groundingFailure ?? {}).includes("存在しない表層"),
       false,
     );
+  }
+});
+
+test("H2. extractor safe code is preserved without exposing it as the high-level reason", async () => {
+  const db = openMemoryDb();
+  seedRegistry(db);
+  seedSessionA(db);
+  const result = await planIncrementalSession({
+    sessionId: SESSION_A,
+    db,
+    extractCandidates: async () => {
+      throw new IncrementalExtractError(
+        "schema",
+        "SECRET_USER provider body stack fixture",
+      );
+    },
+  });
+  assert.equal(result.status, "blocked");
+  if (result.status === "blocked") {
+    assert.equal(result.code, "extractor_failed");
+    assert.equal(result.failureCode, "schema");
+  }
+});
+
+test("H3. extractor failure without a known safe code keeps failureCode null", async () => {
+  const db = openMemoryDb();
+  seedRegistry(db);
+  seedSessionA(db);
+  const result = await planIncrementalSession({
+    sessionId: SESSION_A,
+    db,
+    extractCandidates: async () => {
+      throw new IncrementalExtractError(
+        "secret_like_unknown_code",
+        "SECRET_USER provider body stack fixture",
+      );
+    },
+  });
+  assert.equal(result.status, "blocked");
+  if (result.status === "blocked") {
+    assert.equal(result.code, "extractor_failed");
+    assert.equal(result.failureCode, null);
   }
 });
 

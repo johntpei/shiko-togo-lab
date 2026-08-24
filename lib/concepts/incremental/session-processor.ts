@@ -104,6 +104,7 @@ export type IncrementalConceptSessionProcessorResult = {
   };
   planning: {
     status: IncrementalSessionPlanResult["status"] | "no_actions" | null;
+    failureCode: string | null;
     existingMatchCount: number;
     newCandidateCount: number;
     provisionalNewCount: number;
@@ -166,6 +167,7 @@ export type ProcessIncrementalConceptSessionDeps = {
 function emptyPlanning(): IncrementalConceptSessionProcessorResult["planning"] {
   return {
     status: null,
+    failureCode: null,
     existingMatchCount: 0,
     newCandidateCount: 0,
     provisionalNewCount: 0,
@@ -244,6 +246,7 @@ function planningCounts(planResult: IncrementalSessionPlanResult) {
   if (planResult.status === "blocked") {
     return {
       status: planResult.status,
+      failureCode: planResult.failureCode,
       existingMatchCount: 0,
       newCandidateCount: 0,
       provisionalNewCount: 0,
@@ -252,6 +255,7 @@ function planningCounts(planResult: IncrementalSessionPlanResult) {
   }
   return {
     status: planResult.status,
+    failureCode: null,
     existingMatchCount: planResult.existingMatches,
     newCandidateCount: planResult.newCandidates,
     provisionalNewCount: planResult.provisionalNewCandidates,
@@ -286,6 +290,7 @@ function applyPreparedPlanning(
 ) {
   result.planning = {
     status: planning.status,
+    failureCode: null,
     existingMatchCount: planning.existingMatchCount,
     newCandidateCount: planning.newCandidateCount,
     provisionalNewCount: planning.provisionalNewCount,

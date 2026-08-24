@@ -1,4 +1,7 @@
-import type { DualPipelineOrchestratorExecutionResult } from "./execution-types";
+import {
+  sanitizeDualPipelineReviewFailureToken,
+  type DualPipelineOrchestratorExecutionResult,
+} from "./execution-types";
 import type {
   ConceptSessionPlanRow,
   DualPipelineOrchestratorPlan,
@@ -47,6 +50,7 @@ export type ProcessingExecutionPresentation = {
   reviewSummary: string | null;
   status: DualPipelineOrchestratorExecutionResult["status"];
   conceptFailures: ProcessingConceptFailurePresentation[];
+  reviewFailure: ProcessingReviewFailurePresentation | null;
 };
 
 export type ProcessingConceptFailurePresentation = {
@@ -60,6 +64,43 @@ export type ProcessingConceptFailurePresentation = {
   extractionCalls: number;
   assessmentCalls: number;
 };
+
+export type ProcessingReviewFailurePresentation = {
+  status: "projection_failed" | "blocked" | "failed";
+  executionMode: "fresh" | "resumed";
+  failureReason: string | null;
+  failureCode: string | null;
+  llmCalls: number;
+  message: string;
+};
+
+function reviewFailureMessage(code: string | null, reason: string | null) {
+  if (code === "too_long" || reason === "too_long") {
+    return "選んだ対話の内容が長いため、対話をまたいだ観測を作成できませんでした。";
+  }
+  return "対話をまたいだ観測を完了できませんでした。";
+}
+
+function processingReviewFailure(
+  diagnostic: NonNullable<
+    DualPipelineOrchestratorExecutionResult["review"]["failureDiagnostic"]
+  >,
+): ProcessingReviewFailurePresentation {
+  const failureReason = sanitizeDualPipelineReviewFailureToken(
+    diagnostic.failureReason,
+  );
+  const failureCode = sanitizeDualPipelineReviewFailureToken(
+    diagnostic.failureCode,
+  );
+  return {
+    status: diagnostic.status,
+    executionMode: diagnostic.executionMode,
+    failureReason,
+    failureCode,
+    llmCalls: diagnostic.llmCalls,
+    message: reviewFailureMessage(failureCode, failureReason),
+  };
+}
 
 function selectionKey(sessionIds: readonly string[]) {
   return uniqueSortedSessionIds(sessionIds).join("\u001f");
@@ -266,6 +307,10 @@ export function buildProcessingExecutionPresentation(
         },
       ];
     });
+  const reviewFailure: ProcessingReviewFailurePresentation | null =
+    result.review.failureDiagnostic
+      ? processingReviewFailure(result.review.failureDiagnostic)
+      : null;
 
   let conceptSummary: string | null = null;
   if (conceptExecuted > 0) {
@@ -286,6 +331,8 @@ export function buildProcessingExecutionPresentation(
     reviewSummary = "対話をまたいだ観測: 完了しました";
   } else if (result.review.processorStatus === "projection_failed") {
     reviewSummary = "対話をまたいだ観測: 保存済みですが反映が未完了です";
+  } else if (result.review.processorStatus === "failed") {
+    reviewSummary = "対話をまたいだ観測: 完了できませんでした";
   } else if (result.review.resolvedAction === "blocked") {
     reviewSummary = "対話をまたいだ観測: 今回は実行できませんでした";
   }
@@ -329,6 +376,7 @@ export function buildProcessingExecutionPresentation(
     reviewSummary,
     status: result.status,
     conceptFailures,
+    reviewFailure,
   };
 }
 

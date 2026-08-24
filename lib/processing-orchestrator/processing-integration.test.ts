@@ -121,6 +121,7 @@ function completedConcept(sessionId: string): IncrementalConceptSessionProcessor
     eligibility: { status: "eligible", reason: null },
     planning: {
       status: null,
+      failureCode: null,
       existingMatchCount: 0,
       newCandidateCount: 0,
       provisionalNewCount: 0,

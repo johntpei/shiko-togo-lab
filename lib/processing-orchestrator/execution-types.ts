@@ -44,11 +44,44 @@ export type DualPipelineReviewExecutionResult = {
   reviewId: string | null;
   processorStatus: IntegratedReviewProcessingResult["status"] | null;
   processorReason: string | null;
+  processorCode: string | null;
   executionMode: IntegratedReviewProcessingResult["executionMode"] | null;
   llmCalls: number;
   projectionStatus: IntegratedReviewProcessingResult["projection"]["status"] | null;
   observationCount: number;
+  failureDiagnostic: DualPipelineReviewFailureDiagnostic | null;
 };
+
+export type DualPipelineReviewFailureDiagnostic = {
+  status: Exclude<IntegratedReviewProcessingResult["status"], "completed">;
+  executionMode: IntegratedReviewProcessingResult["executionMode"];
+  failureReason: string | null;
+  failureCode: string | null;
+  llmCalls: number;
+};
+
+const SAFE_REVIEW_FAILURE_TOKENS = new Set([
+  "not_configured",
+  "unsupported_provider",
+  "too_few_sessions",
+  "too_long",
+  "api",
+  "timeout",
+  "schema",
+  "save",
+  "projection_failed",
+  "legacy_review_completion_unknown",
+  "missing_review",
+  "unsupported_review_version",
+  "invalid_payload",
+  "observation_projection_failed",
+]);
+
+export function sanitizeDualPipelineReviewFailureToken(
+  value: string | null,
+): string | null {
+  return value && SAFE_REVIEW_FAILURE_TOKENS.has(value) ? value : null;
+}
 
 export type DualPipelineOrchestratorExecutionResult = {
   version: DualPipelineOrchestratorExecutionVersion;

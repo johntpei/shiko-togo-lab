@@ -132,6 +132,7 @@ function conceptResult(
     eligibility: { status: "eligible", reason: null },
     planning: {
       status: null,
+      failureCode: null,
       existingMatchCount: 0,
       newCandidateCount: 0,
       provisionalNewCount: 0,
@@ -359,6 +360,103 @@ test("concept failure diagnostics do not invent or expose unsafe tokens", async 
     failureCode: null,
     extractionCalls: 1,
     assessmentCalls: 0,
+  });
+});
+
+test("planning extractor code and Review too_long diagnostics remain separate in a partial result", async () => {
+  const db = openMemoryDb();
+  seedSession(db, "s-a");
+  seedSession(db, "s-b");
+  const result = await executeDualPipelineProcessing(
+    { sessionIds: ["s-a", "s-b"] },
+    {
+      db,
+      initialCoverage: coverageFor([]),
+      processConceptSession: async (input) =>
+        input.sessionId === "s-a"
+          ? conceptResult("s-a", "blocked", {
+              reason: "extractor_failed",
+              executionMode: null,
+              extractionCalls: 1,
+              assessmentCalls: 0,
+              stageOrder: ["eligibility", "extraction", "planning"],
+              planning: {
+                status: "blocked",
+                failureCode: "schema",
+                existingMatchCount: 0,
+                newCandidateCount: 0,
+                provisionalNewCount: 0,
+                groundingRejectedCount: 0,
+              },
+            })
+          : conceptResult("s-b", "completed"),
+      processReviewSelection: async () =>
+        reviewResult({
+          status: "failed",
+          reviewId: null,
+          llmCalls: 0,
+          reason: "too_long",
+          code: "too_long",
+          projection: {
+            status: "not_run",
+            observationCount: 0,
+            code: null,
+          },
+        }),
+    },
+  );
+
+  assert.equal(result.status, "partial");
+  assert.deepEqual(result.concept.sessions[0]?.failureDiagnostic, {
+    failureStage: "planning",
+    failureReason: "extractor_failed",
+    failureCode: "schema",
+    extractionCalls: 1,
+    assessmentCalls: 0,
+  });
+  assert.equal(result.concept.sessions[1]?.failureDiagnostic, null);
+  assert.equal(result.review.processorReason, "too_long");
+  assert.equal(result.review.processorCode, "too_long");
+  assert.deepEqual(result.review.failureDiagnostic, {
+    status: "failed",
+    executionMode: "fresh",
+    failureReason: "too_long",
+    failureCode: "too_long",
+    llmCalls: 0,
+  });
+});
+
+test("Review diagnostics discard unknown and unsafe processor information", async () => {
+  const db = openMemoryDb();
+  seedSession(db, "s-a");
+  seedSession(db, "s-b");
+  const result = await executeDualPipelineProcessing(
+    { sessionIds: ["s-a", "s-b"] },
+    {
+      db,
+      initialCoverage: coverageFor(["s-a", "s-b"]),
+      processReviewSelection: async () =>
+        reviewResult({
+          status: "failed",
+          reviewId: null,
+          llmCalls: 0,
+          reason: USER_QUOTE,
+          code: "secret_like_unknown_code",
+          projection: {
+            status: "not_run",
+            observationCount: 0,
+            code: null,
+          },
+        }),
+    },
+  );
+
+  assert.deepEqual(result.review.failureDiagnostic, {
+    status: "failed",
+    executionMode: "fresh",
+    failureReason: null,
+    failureCode: null,
+    llmCalls: 0,
   });
 });
 
