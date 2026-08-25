@@ -186,6 +186,36 @@ test("B. missing Session is invalid and not execution-ready", () => {
   assert.equal(plan.concept.executionReady, false);
 });
 
+test("Review input too-long blocks only Review while Concept remains actionable", () => {
+  const plan = buildDualPipelineOrchestratorPlan({
+    ...emptyInput(),
+    requestedSessionIds: ["s-a", "s-b"],
+    existingSessionIds: ["s-a", "s-b"],
+    conceptEvaluations: [
+      { sessionId: "s-a", status: "eligible", reason: "not_covered" },
+      {
+        sessionId: "s-b",
+        status: "already_covered",
+        reason: "initial_processing_coverage",
+      },
+    ],
+    reviewInputPreflight: {
+      serializationVersion: "review-evidence-compact-v1",
+      serializedChars: 80_001,
+      evidenceCount: 2,
+      sessionCount: 2,
+      withinLimit: false,
+    },
+  });
+
+  assert.equal(plan.concept.action, "needs_processing");
+  assert.equal(plan.concept.executionReady, true);
+  assert.equal(plan.review.action, "blocked");
+  assert.equal(plan.review.blockingReason, "review_input_too_long");
+  assert.equal(plan.review.executionReady, false);
+  assert.equal(plan.workload.reviewCallsKnown, 0);
+});
+
 test("C. duplicate Session IDs are deduped", () => {
   const plan = buildDualPipelineOrchestratorPlan({
     ...emptyInput(),

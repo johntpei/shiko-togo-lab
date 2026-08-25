@@ -1,5 +1,6 @@
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import type { ReviewSessionSource } from "@/lib/ai/review-input";
+import { buildCanonicalReviewEvidenceInput } from "@/lib/ai/review-evidence-transport";
 import type { InitialConceptProcessingCoverageLoad } from "@/lib/concepts/incremental/eligibility";
 import {
   processIncrementalConceptSession,
@@ -7,13 +8,14 @@ import {
   type ProcessIncrementalConceptSessionDeps,
 } from "@/lib/concepts/incremental/session-processor";
 import type { ConceptQueryDb } from "@/lib/db/concept-queries";
-import { messages, sessions } from "@/lib/db/schema";
+import { sessions } from "@/lib/db/schema";
 import type { IntegratedReviewProcessingResult } from "@/lib/reviews/integrated-review-processor";
 import {
   processIntegratedReviewSelection,
   resumeIntegratedReviewProjection,
 } from "@/lib/reviews/integrated-review-processor";
 import { classifyExactReviewSelectionState } from "@/lib/reviews/review-selection-state";
+import { loadCanonicalReviewSessionSources } from "@/lib/reviews/review-session-sources";
 import {
   DUAL_PIPELINE_ORCHESTRATOR_EXECUTION_VERSION,
   type DualPipelineConceptSessionResult,
@@ -65,50 +67,6 @@ export type ExecuteDualPipelineProcessingDeps = {
     Omit<ProcessIncrementalConceptSessionDeps, "db" | "coverage">
   >;
 };
-
-function defaultLoadReviewSessionSources(
-  sessionIds: readonly string[],
-  db: ConceptQueryDb,
-): ReviewSessionSource[] {
-  const normalized = uniqueSortedSessionIds(sessionIds);
-  const records = db
-    .select()
-    .from(sessions)
-    .where(inArray(sessions.id, normalized))
-    .all();
-  const byId = new Map(records.map((session) => [session.id, session]));
-  return normalized.flatMap((sessionId) => {
-    const session = byId.get(sessionId);
-    if (!session) {
-      return [];
-    }
-    const sessionMessages = db
-      .select()
-      .from(messages)
-      .where(eq(messages.sessionId, sessionId))
-      .all()
-      .map((message) => ({
-        id: message.id,
-        role: message.role,
-        content: message.content,
-        attachmentsJson: message.attachmentsJson,
-      }));
-    return [
-      {
-        session: {
-          id: session.id,
-          title: session.title,
-          occurredAt: session.occurredAt,
-          source: session.source,
-          category: session.category,
-          createdAt: session.createdAt,
-        },
-        messages: sessionMessages,
-        analysis: null,
-      },
-    ];
-  });
-}
 
 function emptyReviewResult(
   action: ReviewStageAction,
@@ -331,7 +289,7 @@ export async function executeDualPipelineProcessing(
   const resumeReviewProjection =
     deps.resumeReviewProjection ?? resumeIntegratedReviewProjection;
   const loadReviewSessionSources =
-    deps.loadReviewSessionSources ?? defaultLoadReviewSessionSources;
+    deps.loadReviewSessionSources ?? loadCanonicalReviewSessionSources;
   const reviewTitle = deps.reviewTitle ?? DEFAULT_REVIEW_TITLE;
 
   if (sessionIds.length === 0) {
@@ -428,10 +386,16 @@ export async function executeDualPipelineProcessing(
   }
 
   const freshReviewState = loadReviewSelectionState(deps.db, validSessionIds);
+  const freshReviewSources = loadReviewSessionSources(validSessionIds, deps.db);
+  const freshReviewPreflight =
+    validSessionIds.length >= 2
+      ? buildCanonicalReviewEvidenceInput(freshReviewSources).preflight
+      : null;
   const resolvedReview = resolveReviewStageAction({
     requestedSessionIds: sessionIds,
     validSessionIds,
     reviewSelectionState: freshReviewState,
+    reviewInputPreflight: freshReviewPreflight,
   });
 
   const initialReviewAction = initialPlan.review.action;
@@ -452,9 +416,8 @@ export async function executeDualPipelineProcessing(
       blockingReason: resolvedReview.blockingReason,
     });
   } else if (resolvedReview.action === "run_for_selection") {
-    const sources = loadReviewSessionSources(validSessionIds, deps.db);
     const processorResult: IntegratedReviewProcessingResult =
-      await processReviewSelection(sources, reviewTitle, { db: deps.db });
+      await processReviewSelection(freshReviewSources, reviewTitle, { db: deps.db });
     reviewResult = {
       action: initialReviewAction,
       resolvedAction: resolvedReview.action,

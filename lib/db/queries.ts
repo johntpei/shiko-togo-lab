@@ -108,7 +108,7 @@ export function listMessagesBySessionId(sessionId: string) {
     .select()
     .from(messages)
     .where(eq(messages.sessionId, sessionId))
-    .orderBy(asc(messages.index))
+    .orderBy(asc(messages.index), asc(messages.id))
     .all();
 }
 

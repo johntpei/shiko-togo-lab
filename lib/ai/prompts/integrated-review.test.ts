@@ -7,27 +7,54 @@ import {
   INTEGRATED_REVIEW_PROMPT_V3,
   INTEGRATED_REVIEW_PROMPT_V4,
   INTEGRATED_REVIEW_PROMPT_V5,
+  INTEGRATED_REVIEW_PROMPT_V6,
   INTEGRATED_REVIEW_PROMPT_VERSION,
   INTEGRATED_REVIEW_SYSTEM_PROMPT,
   INTEGRATED_REVIEW_SYSTEM_PROMPT_V1,
   INTEGRATED_REVIEW_SYSTEM_PROMPT_V4,
   INTEGRATED_REVIEW_SYSTEM_PROMPT_V5,
+  INTEGRATED_REVIEW_SYSTEM_PROMPT_V6,
   buildIntegratedReviewUserPromptV5,
+  buildIntegratedReviewUserPromptV6,
 } from "./integrated-review";
 
-test("現行 promptVersion は integrated-review-v5", () => {
-  assert.equal(INTEGRATED_REVIEW_PROMPT_VERSION, "integrated-review-v5");
+test("現行 promptVersion は integrated-review-v6", () => {
+  assert.equal(INTEGRATED_REVIEW_PROMPT_VERSION, "integrated-review-v6");
+  assert.equal(INTEGRATED_REVIEW_PROMPT_V6, "integrated-review-v6");
   assert.equal(INTEGRATED_REVIEW_PROMPT_V5, "integrated-review-v5");
-  assert.equal(INTEGRATED_REVIEW_SYSTEM_PROMPT, INTEGRATED_REVIEW_SYSTEM_PROMPT_V5);
+  assert.equal(INTEGRATED_REVIEW_SYSTEM_PROMPT, INTEGRATED_REVIEW_SYSTEM_PROMPT_V6);
 });
 
-test("v1〜v4 プロンプトは残している", () => {
+test("v1〜v5 プロンプトは残している", () => {
   assert.equal(INTEGRATED_REVIEW_PROMPT_V1, "integrated-review-v1");
   assert.equal(INTEGRATED_REVIEW_PROMPT_V2, "integrated-review-v2");
   assert.equal(INTEGRATED_REVIEW_PROMPT_V3, "integrated-review-v3");
   assert.equal(INTEGRATED_REVIEW_PROMPT_V4, "integrated-review-v4");
+  assert.equal(INTEGRATED_REVIEW_PROMPT_V5, "integrated-review-v5");
   assert.match(INTEGRATED_REVIEW_SYSTEM_PROMPT_V1, /要約ではありません/);
   assert.match(INTEGRATED_REVIEW_SYSTEM_PROMPT_V4, /解釈文そのものが原文に無くてよい/);
+});
+
+test("v6 は v5 semantic policyを維持してtransport参照だけalias化する", () => {
+  for (const semantic of [
+    "Claimを先に考え、後からEvidenceを探してはいけない",
+    "PHASE A",
+    "PHASE B",
+    "PHASE C",
+    "2 Session 未満の Theme / Tension / Insight / Hypothesis は出さない",
+  ]) {
+    assert.match(INTEGRATED_REVIEW_SYSTEM_PROMPT_V5, new RegExp(semantic));
+    assert.match(INTEGRATED_REVIEW_SYSTEM_PROMPT_V6, new RegExp(semantic));
+  }
+  assert.match(INTEGRATED_REVIEW_SYSTEM_PROMPT_V6, /EvidenceAlias/);
+  assert.doesNotMatch(INTEGRATED_REVIEW_SYSTEM_PROMPT_V6, /S01:M003:E02/);
+  const user = buildIntegratedReviewUserPromptV6(
+    "#S\tS01\n#M\tM001\tU\n0\tEvidence本文",
+  );
+  assert.match(user, /ASCII EvidenceAlias/);
+  assert.match(user, /evidenceAliases/);
+  assert.match(user, /UはUSER、AはASSISTANT/);
+  assert.match(user, /一字も変えず/);
 });
 
 test("v5 は Evidence-first でありプロジェクト名をハードコードしない", () => {
@@ -54,9 +81,19 @@ test("Case L: Current Context は Evidence に数えない", () => {
   assert.ok(contextIdx >= 0 && sessionIdx > contextIdx);
 });
 
+test("v6でもCurrent Contextをcompact Sessionより前に置く", () => {
+  const user = buildIntegratedReviewUserPromptV6("#S\tS01");
+  assert.ok(user.indexOf("CURRENT CONTEXT") < user.indexOf("#S\tS01"));
+});
+
 test("Case H: fake EvidenceRef を作らない", () => {
   assert.match(INTEGRATED_REVIEW_SYSTEM_PROMPT_V5, /存在しないrefを作らない/);
   assert.match(INTEGRATED_REVIEW_SYSTEM_PROMPT_V5, /fake ref を作らず/);
+});
+
+test("v6 はfake aliasを作らない", () => {
+  assert.match(INTEGRATED_REVIEW_SYSTEM_PROMPT_V6, /存在しないaliasを作らない/);
+  assert.match(INTEGRATED_REVIEW_SYSTEM_PROMPT_V6, /fake alias を作らず/);
 });
 
 test("Case M / N: Next Question は発見から作り、一般質問は禁止", () => {

@@ -7,8 +7,12 @@ import {
   MAX_NEXT_QUESTIONS,
 } from "../limits";
 import { INTEGRATED_REVIEW_PROMPT_VERSION } from "../prompts/integrated-review";
+import { ANALYZE_SESSION_PROMPT_V4 } from "../prompts/analyze-session";
 import type { ReviewSessionSource } from "../review-input";
-import { runIntegratedReview } from "./integrated-review";
+import {
+  runIntegratedReview as runIntegratedReviewProduction,
+  type IntegratedReviewDeps,
+} from "./integrated-review";
 
 function message(id: string, role: string, content: string) {
   return { id, role, content, attachmentsJson: null };
@@ -123,6 +127,65 @@ const validOutput = {
   ],
 };
 
+const exactRefAliases = new Map([
+  ["S01:M001:E01", "0"],
+  ["S01:M002:E01", "1"],
+  ["S02:M001:E01", "2"],
+  ["S02:M002:E01", "3"],
+  ["S03:M001:E01", "4"],
+]);
+
+function toV6TransportFixture(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(toV6TransportFixture);
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  const mapped: Record<string, unknown> = {};
+  for (const [key, field] of Object.entries(value)) {
+    const aliasKey =
+      key === "evidenceRefs"
+        ? "evidenceAliases"
+        : key === "beforeEvidenceRefs"
+          ? "beforeEvidenceAliases"
+          : key === "afterEvidenceRefs"
+            ? "afterEvidenceAliases"
+            : key;
+    if (
+      (key === "evidenceRefs" ||
+        key === "beforeEvidenceRefs" ||
+        key === "afterEvidenceRefs") &&
+      Array.isArray(field)
+    ) {
+      mapped[aliasKey] = field.map((ref) =>
+        exactRefAliases.get(String(ref)) ?? "unknownAlias",
+      );
+    } else {
+      mapped[aliasKey] = toV6TransportFixture(field);
+    }
+  }
+  return mapped;
+}
+
+async function runIntegratedReview(
+  sources: ReviewSessionSource[],
+  title: string,
+  deps: IntegratedReviewDeps,
+) {
+  const generateStructured = deps.generateStructured;
+  return runIntegratedReviewProduction(sources, title, {
+    ...deps,
+    generateStructured: async (request) => {
+      const generated = await generateStructured(request);
+      return {
+        ...generated,
+        parsed: toV6TransportFixture(generated.parsed),
+      };
+    },
+  });
+}
+
 async function withReviewEnv(run: () => Promise<void>) {
   const prev = {
     key: process.env.OPENAI_API_KEY,
@@ -155,9 +218,9 @@ test("Case A: 2 Session 選択なら Review 可能", async () => {
     const result = await runIntegratedReview(twoSessions, "統合レビュー — テスト", {
       generateStructured: async (request) => {
         called = true;
-        assert.equal(request.schemaName, "integrated_review_v5");
+        assert.equal(request.schemaName, "integrated_review_v6");
         const contextIdx = request.user.indexOf("CURRENT CONTEXT");
-        const sessionIdx = request.user.indexOf("SESSION S01");
+        const sessionIdx = request.user.indexOf("#S\tS01");
         assert.ok(contextIdx >= 0 && sessionIdx > contextIdx);
         assert.match(request.user, /思考統合研究所/);
         assert.match(request.user, /Core Purpose:/);
@@ -166,6 +229,10 @@ test("Case A: 2 Session 選択なら Review 可能", async () => {
       },
       save: (input) => {
         assert.equal(input.promptVersion, INTEGRATED_REVIEW_PROMPT_VERSION);
+        assert.equal(
+          input.payload.settings.transportVersion,
+          "review-evidence-compact-v1",
+        );
         assert.equal(input.model, "returned-model");
         assert.equal(input.payload.commonThemes[0]?.semanticValid, true);
         assert.equal(input.payload.shifts[0]?.semanticValid, true);
@@ -256,6 +323,44 @@ test("Case L: 入力上限超過では API を呼ばない", async () => {
         save: () => ({ id: "review-1" }),
       },
     );
+    assert.equal(called, false);
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "too_long");
+    }
+  });
+});
+
+test("Manual Review-shaped SessionAnalysis also uses the canonical provider guard", async () => {
+  await withReviewEnv(async () => {
+    let called = false;
+    const manualSources = twoSessions.map((item) => ({
+      ...item,
+      analysis: {
+        promptVersion: ANALYZE_SESSION_PROMPT_V4,
+        payload: {
+          summary: "補助分析".repeat(INTEGRATED_REVIEW_MAX_INPUT_CHARS),
+          items: [],
+          settings: {
+            provider: "openai",
+            store: false as const,
+            maxInputChars: 40_000,
+          },
+        },
+      },
+    }));
+    const result = await runIntegratedReview(
+      manualSources,
+      "統合レビュー — Manual互換",
+      {
+        generateStructured: async () => {
+          called = true;
+          return { parsed: validOutput, model: "test-model" };
+        },
+        save: () => ({ id: "review-manual" }),
+      },
+    );
+
     assert.equal(called, false);
     assert.equal(result.ok, false);
     if (!result.ok) {
@@ -601,6 +706,40 @@ test("Case A: evidenceGroups の S01 と S02 は flatten されて valid", async
         assert.equal(input.payload.crossInsights[0]?.semanticValid, true);
         assert.equal(input.payload.crossInsights[0]?.distinctSessionCount, 2);
         assert.equal(input.payload.crossInsights[0]?.evidence.length, 2);
+        return { id: "review-1" };
+      },
+    });
+    assert.equal(result.ok, true);
+  });
+});
+
+test("server-owned alias identity wins over a wrong model-supplied sessionRef label", async () => {
+  await withReviewEnv(async () => {
+    const result = await runIntegratedReview(twoSessions, "統合レビュー — テスト", {
+      generateStructured: async () => ({
+        parsed: {
+          ...validOutput,
+          crossInsights: [
+            {
+              text: "aliasの正確なprovenanceから2 Sessionの構造が見える。",
+              relationType: "complement",
+              evidenceGroups: [
+                { sessionRef: "S01", evidenceRefs: ["S01:M001:E01"] },
+                { sessionRef: "S01", evidenceRefs: ["S02:M001:E01"] },
+              ],
+              evidenceRefs: ["S01:M001:E01", "S02:M001:E01"],
+            },
+          ],
+        },
+        model: "test-model",
+      }),
+      save: (input) => {
+        assert.equal(input.payload.crossInsights[0]?.semanticValid, true);
+        assert.equal(input.payload.crossInsights[0]?.distinctSessionCount, 2);
+        assert.deepEqual(
+          input.payload.crossInsights[0]?.evidence.map((item) => item.sessionId),
+          ["s1", "s2"],
+        );
         return { id: "review-1" };
       },
     });

@@ -6,7 +6,8 @@ export const INTEGRATED_REVIEW_PROMPT_V2 = "integrated-review-v2";
 export const INTEGRATED_REVIEW_PROMPT_V3 = "integrated-review-v3";
 export const INTEGRATED_REVIEW_PROMPT_V4 = "integrated-review-v4";
 export const INTEGRATED_REVIEW_PROMPT_V5 = "integrated-review-v5";
-export const INTEGRATED_REVIEW_PROMPT_VERSION = INTEGRATED_REVIEW_PROMPT_V5;
+export const INTEGRATED_REVIEW_PROMPT_V6 = "integrated-review-v6";
+export const INTEGRATED_REVIEW_PROMPT_VERSION = INTEGRATED_REVIEW_PROMPT_V6;
 
 export const INTEGRATED_REVIEW_SYSTEM_PROMPT_V1 = `あなたは、複数の対話Sessionを横断して「まだ本人が気づいていなかったつながり」を見つけるアシスタントです。
 与えられた Session / Evidence Units 以外の情報は使いません。Web検索や一般知識での補完もしません。
@@ -483,7 +484,24 @@ quote を自分で書かない。入力内の Cross-session EvidenceRef だけ�
 - Evidenceにないドメインを追加しない
 `;
 
-export const INTEGRATED_REVIEW_SYSTEM_PROMPT = INTEGRATED_REVIEW_SYSTEM_PROMPT_V5;
+function toCompactAliasTransportPrompt(v5: string) {
+  return v5
+    .replace(
+      "EvidenceRef は入力に明示された S01:M003:E02 形式だけか。存在しないrefを作らない。",
+      "EvidenceAlias は入力のEvidence行に明示されたASCII aliasだけか。存在しないaliasを作らない。",
+    )
+    .replaceAll("beforeEvidenceRefs", "beforeEvidenceAliases")
+    .replaceAll("afterEvidenceRefs", "afterEvidenceAliases")
+    .replaceAll("evidenceRefs", "evidenceAliases")
+    .replaceAll("EvidenceRef", "EvidenceAlias")
+    .replaceAll("fake ref", "fake alias");
+}
+
+/** v5 semantic policy with transport-reference syntax changed to compact aliases. */
+export const INTEGRATED_REVIEW_SYSTEM_PROMPT_V6 =
+  toCompactAliasTransportPrompt(INTEGRATED_REVIEW_SYSTEM_PROMPT_V5);
+
+export const INTEGRATED_REVIEW_SYSTEM_PROMPT = INTEGRATED_REVIEW_SYSTEM_PROMPT_V6;
 
 export function buildIntegratedReviewUserPrompt(labeledTranscript: string) {
   return `次の複数 Session の Evidence Units だけを横断分析してください。
@@ -567,4 +585,30 @@ Hypothesis には rationale と validationIdea。nextQuestions は今回の発�
 ${currentContextBlock}
 
 ${labeledTranscript}`;
+}
+
+export function buildIntegratedReviewUserPromptV6(
+  compactEvidence: string,
+  currentContextBlock: string = formatCurrentContextBlock(),
+) {
+  return `次の複数 Session の Evidence Units を、Evidence-first で横断分析してください。
+
+先に異なるSessionから関連Evidenceをグループ化し、関係を見てから Claim を書いてください。
+Claimを先に考えないでください。2 Session分の実在Evidenceが無ければそのitemは出さないでください。
+存在しない EvidenceAlias を作らないでください。Current Context は Evidence ではありません。
+commonThemes / crossInsights / hypotheses は evidenceGroups を必須とし、同じaliasを evidenceAliases にも列挙してください。
+tensions は sideA と sideB を異なるSessionのEvidenceで先に固めてください。
+Hypothesis には rationale と validationIdea。nextQuestions は今回の発見から作ってください。「次のステップは何か？」は禁止です。
+
+# Compact Evidence format
+#S はSession境界、#Tはタイトル、#Dは日付です。
+#M はMessage順とroleを表し、UはUSER、AはASSISTANTです。
+各Evidence行は「ASCII EvidenceAlias、タブ、Evidence本文」です。
+Evidence本文内の改行・復帰・タブは、それぞれ↵・␍・↹と表記されます。これらは本文の文字を削除する記号ではありません。
+出力ではEvidence本文を書かず、入力にあるEvidenceAliasを一字も変えずに各 evidenceAliases fieldへコピーしてください。
+#Fは添付ありの印でEvidenceではありません。#XはSessionAnalysisであり参考情報のみ、Evidenceではありません。
+
+${currentContextBlock}
+
+${compactEvidence}`;
 }

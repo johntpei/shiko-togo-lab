@@ -16,22 +16,27 @@ import {
 import {
   INTEGRATED_REVIEW_PROMPT_VERSION,
   INTEGRATED_REVIEW_SYSTEM_PROMPT,
-  buildIntegratedReviewUserPromptV5,
+  buildIntegratedReviewUserPromptV6,
 } from "../prompts/integrated-review";
 import type { AiProvider } from "../provider";
-import {
-  buildIntegratedReviewInput,
-  type ReviewSessionSource,
-} from "../review-input";
+import type { ReviewSessionSource } from "../review-input";
+import type { EvidenceUnit } from "../evidence-units";
 import {
   defaultReviewSettings,
-  integratedReviewV5OutputSchema,
+  integratedReviewV6OutputSchema,
+  type IntegratedReviewV5Output,
+  type IntegratedReviewV6Output,
   type StoredReviewEvidence,
   type StoredReviewItem,
   type StoredReviewPayload,
   type StoredReviewShiftItem,
   type ReviewSupportType,
 } from "../review-schemas";
+import {
+  REVIEW_EVIDENCE_TRANSPORT_VERSION,
+  buildCanonicalReviewEvidenceInput,
+  exactEvidenceRefForAlias,
+} from "../review-evidence-transport";
 import { textsAreNearDuplicates } from "../review-quality";
 import {
   mergeGroupedEvidenceRefs,
@@ -83,6 +88,81 @@ export type IntegratedReviewDeps = {
   generateStructured: AiProvider["generateStructured"];
   save: (input: IntegratedReviewSaveInput) => { id: string };
 };
+
+function normalizeAliasList(
+  aliases: string[],
+  evidenceByAlias: ReadonlyMap<string, EvidenceUnit>,
+) {
+  return aliases.map((alias) =>
+    exactEvidenceRefForAlias(alias, evidenceByAlias),
+  );
+}
+
+function normalizeIntegratedReviewV6Output(
+  output: IntegratedReviewV6Output,
+  evidenceByAlias: ReadonlyMap<string, EvidenceUnit>,
+): IntegratedReviewV5Output {
+  const groups = (
+    items: Array<{ sessionRef: string; evidenceAliases: string[] }>,
+  ) =>
+    items.map((item) => ({
+      sessionRef: item.sessionRef,
+      evidenceRefs: normalizeAliasList(item.evidenceAliases, evidenceByAlias),
+    }));
+  const groupedItem = <T extends {
+    evidenceGroups: Array<{ sessionRef: string; evidenceAliases: string[] }>;
+    evidenceAliases: string[];
+  }>(item: T) => ({
+    ...item,
+    evidenceGroups: groups(item.evidenceGroups),
+    evidenceRefs: normalizeAliasList(item.evidenceAliases, evidenceByAlias),
+  });
+
+  return {
+    summary: output.summary,
+    commonThemes: output.commonThemes.map(groupedItem),
+    shifts: output.shifts.map((item) => ({
+      before: item.before,
+      after: item.after,
+      interpretation: item.interpretation,
+      beforeEvidenceRefs: normalizeAliasList(
+        item.beforeEvidenceAliases,
+        evidenceByAlias,
+      ),
+      afterEvidenceRefs: normalizeAliasList(
+        item.afterEvidenceAliases,
+        evidenceByAlias,
+      ),
+    })),
+    tensions: output.tensions.map((item) => ({
+      ...groupedItem(item),
+      sideA: {
+        text: item.sideA.text,
+        evidenceRefs: normalizeAliasList(
+          item.sideA.evidenceAliases,
+          evidenceByAlias,
+        ),
+      },
+      sideB: {
+        text: item.sideB.text,
+        evidenceRefs: normalizeAliasList(
+          item.sideB.evidenceAliases,
+          evidenceByAlias,
+        ),
+      },
+    })),
+    crossInsights: output.crossInsights.map(groupedItem),
+    hypotheses: output.hypotheses.map(groupedItem),
+    openQuestions: output.openQuestions.map((item) => ({
+      text: item.text,
+      evidenceRefs: normalizeAliasList(item.evidenceAliases, evidenceByAlias),
+    })),
+    nextQuestions: output.nextQuestions.map((item) => ({
+      text: item.text,
+      evidenceRefs: normalizeAliasList(item.evidenceAliases, evidenceByAlias),
+    })),
+  };
+}
 
 function toStoredEvidence(evidence: ValidatedEvidence): StoredReviewEvidence {
   const evidenceRef =
@@ -165,7 +245,7 @@ export async function runIntegratedReview(
     };
   }
 
-  const input = buildIntegratedReviewInput(sources);
+  const { input, transport } = buildCanonicalReviewEvidenceInput(sources);
   if (input.analyzableSessionCount < MIN_INTEGRATED_REVIEW_SESSIONS) {
     return {
       ok: false,
@@ -173,7 +253,7 @@ export async function runIntegratedReview(
       error: "統合レビューには2件以上のSessionが必要です",
     };
   }
-  if (isIntegratedReviewInputTooLong(input.labeledTranscript)) {
+  if (isIntegratedReviewInputTooLong(transport.serializedEvidence)) {
     return {
       ok: false,
       code: "too_long",
@@ -188,9 +268,9 @@ export async function runIntegratedReview(
     const generated = await deps.generateStructured({
       model: config.model,
       system: INTEGRATED_REVIEW_SYSTEM_PROMPT,
-      user: buildIntegratedReviewUserPromptV5(input.labeledTranscript),
-      schema: integratedReviewV5OutputSchema,
-      schemaName: "integrated_review_v5",
+      user: buildIntegratedReviewUserPromptV6(transport.serializedEvidence),
+      schema: integratedReviewV6OutputSchema,
+      schemaName: "integrated_review_v6",
       timeoutMs: INTEGRATED_REVIEW_TIMEOUT_MS,
     });
     parsedUnknown = generated.parsed;
@@ -209,7 +289,7 @@ export async function runIntegratedReview(
     };
   }
 
-  const parsed = integratedReviewV5OutputSchema.safeParse(parsedUnknown);
+  const parsed = integratedReviewV6OutputSchema.safeParse(parsedUnknown);
   if (!parsed.success) {
     return {
       ok: false,
@@ -217,6 +297,10 @@ export async function runIntegratedReview(
       error: "分析結果の形式が不正だったため保存しませんでした。",
     };
   }
+  const normalized = normalizeIntegratedReviewV6Output(
+    parsed.data,
+    transport.evidenceByAlias,
+  );
 
   const resolve = (refs: string[]) =>
     resolveEvidenceRefs(
@@ -241,7 +325,7 @@ export async function runIntegratedReview(
   const sessionCountFor = (evidence: ValidatedEvidence[]) =>
     distinctSessionIds(evidence, input.unitsByRef).size;
 
-  const commonThemes = parsed.data.commonThemes
+  const commonThemes = normalized.commonThemes
     .slice(0, MAX_COMMON_THEMES)
     .map((item) => {
     const evidence = resolve(refsFromGrouped(item));
@@ -257,7 +341,7 @@ export async function runIntegratedReview(
     );
   });
 
-  const shifts: StoredReviewShiftItem[] = parsed.data.shifts.map((item) => {
+  const shifts: StoredReviewShiftItem[] = normalized.shifts.map((item) => {
     const beforeEvidence = resolve(item.beforeEvidenceRefs);
     const afterEvidence = resolve(item.afterEvidenceRefs);
     const evidence = [...beforeEvidence, ...afterEvidence];
@@ -283,7 +367,7 @@ export async function runIntegratedReview(
     };
   });
 
-  const tensions = parsed.data.tensions.map((item) => {
+  const tensions = normalized.tensions.map((item) => {
     const sideAEvidence = resolve(item.sideA.evidenceRefs);
     const sideBEvidence = resolve(item.sideB.evidenceRefs);
     const evidence = resolve(refsFromGrouped(item));
@@ -310,7 +394,7 @@ export async function runIntegratedReview(
     );
   });
 
-  const crossInsights = parsed.data.crossInsights
+  const crossInsights = normalized.crossInsights
     .slice(0, MAX_CROSS_INSIGHTS)
     .map((item) => {
     const evidence = resolve(refsFromGrouped(item));
@@ -342,7 +426,7 @@ export async function runIntegratedReview(
     );
   });
 
-  const hypotheses = parsed.data.hypotheses
+  const hypotheses = normalized.hypotheses
     .slice(0, MAX_HYPOTHESES)
     .map((item) => {
     const evidence = resolve(refsFromGrouped(item));
@@ -360,7 +444,7 @@ export async function runIntegratedReview(
     );
   });
 
-  const openQuestions = parsed.data.openQuestions
+  const openQuestions = normalized.openQuestions
     .slice(0, MAX_OPEN_QUESTIONS)
     .map((item) => {
     const evidence = resolve(item.evidenceRefs);
@@ -369,7 +453,7 @@ export async function runIntegratedReview(
     });
   });
 
-  const nextQuestions = parsed.data.nextQuestions
+  const nextQuestions = normalized.nextQuestions
     .slice(0, MAX_NEXT_QUESTIONS)
     .map((item) => {
       const evidence = resolve(item.evidenceRefs);
@@ -403,7 +487,7 @@ export async function runIntegratedReview(
   }
 
   const payload: StoredReviewPayload = {
-    summary: parsed.data.summary,
+    summary: normalized.summary,
     commonThemes,
     shifts,
     tensions,
@@ -411,7 +495,10 @@ export async function runIntegratedReview(
     hypotheses,
     openQuestions,
     nextQuestions,
-    settings: defaultReviewSettings(config.provider),
+    settings: defaultReviewSettings(
+      config.provider,
+      REVIEW_EVIDENCE_TRANSPORT_VERSION,
+    ),
     metrics: {
       ...computeEvidenceStats(allItems),
       ...computeSemanticStats(allItems),

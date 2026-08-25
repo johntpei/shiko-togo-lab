@@ -76,6 +76,14 @@ export type ReviewSelectionState = {
   exactLegacyUnknownReviewIds: string[];
 };
 
+export type ReviewInputPreflight = {
+  serializationVersion: string;
+  serializedChars: number;
+  evidenceCount: number;
+  sessionCount: number;
+  withinLimit: boolean;
+};
+
 export type ConceptEvaluation = {
   sessionId: string;
   status: "eligible" | "already_covered" | "blocked";
@@ -88,6 +96,7 @@ export type DualPipelineOrchestratorPlanInput = {
   conceptEvaluations: ConceptEvaluation[];
   reviewSelectionState: ReviewSelectionState;
   reviewCoveredSessionIds: string[];
+  reviewInputPreflight?: ReviewInputPreflight | null;
 };
 
 export type DualPipelineOrchestratorPlan = {
@@ -118,6 +127,7 @@ export type DualPipelineOrchestratorPlan = {
     exactLegacyUnknownReviewIds: string[];
     coveredSessionIds: string[];
     uncoveredSessionIds: string[];
+    inputPreflight: ReviewInputPreflight | null;
   };
   relation: {
     isPrimaryStage: false;

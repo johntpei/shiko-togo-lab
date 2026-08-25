@@ -12,6 +12,8 @@ import {
 } from "@/lib/concepts/incremental/eligibility";
 import type { ConceptQueryDb } from "@/lib/db/concept-queries";
 import { sessions } from "@/lib/db/schema";
+import { buildCanonicalReviewEvidenceInput } from "@/lib/ai/review-evidence-transport";
+import { loadCanonicalReviewSessionSources } from "@/lib/reviews/review-session-sources";
 import {
   classifyExactReviewSelectionState,
   listReviewCoveredSessionIds,
@@ -111,6 +113,12 @@ export function loadDualPipelineOrchestratorPlan(input: {
     input.db,
     validSessionIds,
   );
+  const reviewInputPreflight =
+    validSessionIds.length >= 2
+      ? buildCanonicalReviewEvidenceInput(
+          loadCanonicalReviewSessionSources(validSessionIds, input.db),
+        ).preflight
+      : null;
 
   const plan = buildDualPipelineOrchestratorPlan({
     requestedSessionIds,
@@ -118,6 +126,7 @@ export function loadDualPipelineOrchestratorPlan(input: {
     conceptEvaluations,
     reviewSelectionState,
     reviewCoveredSessionIds,
+    reviewInputPreflight,
   });
 
   return { ...plan, initialCoverageStatus: coverageStatus(input.initialCoverage) };

@@ -54,6 +54,63 @@ test("plan presentation maps review run_for_selection", () => {
   assert.equal(presentation.canExecute, true);
 });
 
+test("Review too-long keeps CTA enabled when Concept is actionable", () => {
+  const plan = buildDualPipelineOrchestratorPlan({
+    ...emptyInput(),
+    requestedSessionIds: ["s-a", "s-b"],
+    existingSessionIds: ["s-a", "s-b"],
+    conceptEvaluations: [
+      { sessionId: "s-a", status: "eligible", reason: "not_covered" },
+      {
+        sessionId: "s-b",
+        status: "already_covered",
+        reason: "initial_processing_coverage",
+      },
+    ],
+    reviewInputPreflight: {
+      serializationVersion: "review-evidence-compact-v1",
+      serializedChars: 80_001,
+      evidenceCount: 2,
+      sessionCount: 2,
+      withinLimit: false,
+    },
+  });
+  const presentation = buildProcessingPlanPresentation({ plan });
+  assert.equal(presentation.canExecute, true);
+  assert.equal(presentation.review.summary, "今回は実行できません");
+  assert.match(presentation.review.detail ?? "", /選んだ内容が長い/);
+});
+
+test("Review-only too-long disables CTA when all Concepts are covered", () => {
+  const plan = buildDualPipelineOrchestratorPlan({
+    ...emptyInput(),
+    requestedSessionIds: ["s-a", "s-b"],
+    existingSessionIds: ["s-a", "s-b"],
+    conceptEvaluations: [
+      {
+        sessionId: "s-a",
+        status: "already_covered",
+        reason: "initial_processing_coverage",
+      },
+      {
+        sessionId: "s-b",
+        status: "already_covered",
+        reason: "initial_processing_coverage",
+      },
+    ],
+    reviewInputPreflight: {
+      serializationVersion: "review-evidence-compact-v1",
+      serializedChars: 80_001,
+      evidenceCount: 2,
+      sessionCount: 2,
+      withinLimit: false,
+    },
+  });
+  const presentation = buildProcessingPlanPresentation({ plan });
+  assert.equal(presentation.canExecute, false);
+  assert.match(presentation.executeDisabledReason ?? "", /選んだ内容が長い/);
+});
+
 test("plan presentation maps review resume_projection", () => {
   const plan = buildDualPipelineOrchestratorPlan({
     ...emptyInput(),

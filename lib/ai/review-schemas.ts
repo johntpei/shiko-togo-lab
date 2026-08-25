@@ -159,6 +159,73 @@ export type IntegratedReviewV5Output = z.infer<
   typeof integratedReviewV5OutputSchema
 >;
 
+const reviewAliasItemSchema = z.object({
+  text: z.string(),
+  evidenceAliases: z.array(z.string()),
+});
+
+const reviewAliasShiftItemSchema = z.object({
+  before: z.string(),
+  after: z.string(),
+  interpretation: z.string(),
+  beforeEvidenceAliases: z.array(z.string()),
+  afterEvidenceAliases: z.array(z.string()),
+});
+
+const reviewEvidenceAliasGroupSchema = z.object({
+  sessionRef: z.string(),
+  evidenceAliases: z.array(z.string()),
+});
+
+const groupedReviewAliasItemSchema = z.object({
+  text: z.string(),
+  relationType: z.enum(REVIEW_RELATION_TYPES),
+  evidenceGroups: z.array(reviewEvidenceAliasGroupSchema),
+  evidenceAliases: z.array(z.string()),
+});
+
+const reviewAliasHypothesisItemSchema = z.object({
+  text: z.string(),
+  rationale: z.string(),
+  validationIdea: z.string(),
+  relationType: z.enum(REVIEW_RELATION_TYPES),
+  evidenceGroups: z.array(reviewEvidenceAliasGroupSchema),
+  evidenceAliases: z.array(z.string()),
+});
+
+const reviewAliasTensionSideSchema = z.object({
+  text: z.string(),
+  evidenceAliases: z.array(z.string()),
+});
+
+const reviewAliasTensionItemSchema = z.object({
+  text: z.string(),
+  relationType: z.enum(REVIEW_RELATION_TYPES),
+  sideA: reviewAliasTensionSideSchema,
+  sideB: reviewAliasTensionSideSchema,
+  evidenceGroups: z.array(reviewEvidenceAliasGroupSchema),
+  evidenceAliases: z.array(z.string()),
+});
+
+/**
+ * v6 is the LLM transport contract. Compact aliases are normalized to the
+ * existing exact-ref domain shape before semantic validation or persistence.
+ */
+export const integratedReviewV6OutputSchema = z.object({
+  summary: z.string(),
+  commonThemes: z.array(groupedReviewAliasItemSchema),
+  shifts: z.array(reviewAliasShiftItemSchema),
+  tensions: z.array(reviewAliasTensionItemSchema),
+  crossInsights: z.array(groupedReviewAliasItemSchema),
+  hypotheses: z.array(reviewAliasHypothesisItemSchema),
+  openQuestions: z.array(reviewAliasItemSchema),
+  nextQuestions: z.array(reviewAliasItemSchema),
+});
+
+export type IntegratedReviewV6Output = z.infer<
+  typeof integratedReviewV6OutputSchema
+>;
+
 export const storedReviewEvidenceSchema = z.object({
   messageRef: z.string(),
   quote: z.string(),
@@ -221,6 +288,7 @@ export const storedReviewPayloadSchema = z.object({
     provider: z.string(),
     store: z.literal(false),
     maxInputChars: z.number(),
+    transportVersion: z.string().optional(),
   }),
   metrics: z
     .object({
@@ -260,10 +328,14 @@ export function parseStoredReviewPayload(
   }
 }
 
-export function defaultReviewSettings(provider: string): StoredReviewPayload["settings"] {
+export function defaultReviewSettings(
+  provider: string,
+  transportVersion?: string,
+): StoredReviewPayload["settings"] {
   return {
     provider,
     store: false,
     maxInputChars: INTEGRATED_REVIEW_MAX_INPUT_CHARS,
+    ...(transportVersion ? { transportVersion } : {}),
   };
 }

@@ -1,10 +1,17 @@
-import { INTEGRATED_REVIEW_PROMPT_V5 } from "@/lib/ai/prompts/integrated-review";
+import {
+  INTEGRATED_REVIEW_PROMPT_V5,
+  INTEGRATED_REVIEW_PROMPT_V6,
+} from "@/lib/ai/prompts/integrated-review";
 
 /**
  * Observation へ投影してよい Review promptVersion。
- * v3/v4 は履歴として残すが、v5 と同等の Evidence-first / Guard 品質は保証しない。
+ * v3/v4 は履歴として残すが、v5/v6 と同等の Evidence-first / Guard 品質は保証しない。
  */
-export const PROJECTABLE_REVIEW_PROMPT_VERSION = INTEGRATED_REVIEW_PROMPT_V5;
+export const PROJECTABLE_REVIEW_PROMPT_VERSION = INTEGRATED_REVIEW_PROMPT_V6;
+export const PROJECTABLE_REVIEW_PROMPT_VERSIONS = [
+  INTEGRATED_REVIEW_PROMPT_V5,
+  INTEGRATED_REVIEW_PROMPT_V6,
+] as const;
 
 export type ReviewProjectionSkipReason = "unsupported_review_version";
 
@@ -19,7 +26,7 @@ export type ReviewProjectionEligibility =
 export function reviewProjectionEligibility(
   promptVersion: string,
 ): ReviewProjectionEligibility {
-  if (promptVersion === PROJECTABLE_REVIEW_PROMPT_VERSION) {
+  if ((PROJECTABLE_REVIEW_PROMPT_VERSIONS as readonly string[]).includes(promptVersion)) {
     return { eligible: true, promptVersion };
   }
   return {

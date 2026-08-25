@@ -3,6 +3,8 @@ import test from "node:test";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { CONCEPT_EXTRACT_PROMPT_VERSION } from "@/lib/ai/prompts/concept-extract";
+import type { ReviewSessionSource } from "@/lib/ai/review-input";
+import { buildCanonicalReviewEvidenceInput } from "@/lib/ai/review-evidence-transport";
 import { hashSourceArtifactText } from "@/lib/concepts/admission/apply-manifest";
 import { CONCEPT_INCREMENTAL_PROCESSING_VERSION } from "@/lib/concepts/incremental/checkpoint";
 import { loadInitialConceptProcessingCoverage } from "@/lib/concepts/incremental/eligibility";
@@ -45,6 +47,50 @@ function seedSession(db: ReturnType<typeof openMemoryDb>, id: string) {
       sourceEndAt: null,
       createdAt: "2026-08-18T00:00:00.000Z",
       updatedAt: "2026-08-18T00:00:00.000Z",
+    })
+    .run();
+}
+
+function reviewSource(id: string, content: string): ReviewSessionSource {
+  return {
+    session: {
+      id,
+      title: id,
+      occurredAt: id === "s-a" ? "2026-08-01" : "2026-08-02",
+      source: "chatgpt",
+      category: "制作",
+      createdAt: "2026-08-18T00:00:00.000Z",
+    },
+    messages: [
+      {
+        id: `m-${id}`,
+        index: 0,
+        role: "user",
+        content,
+        attachmentsJson: null,
+      },
+    ],
+    analysis: null,
+  };
+}
+
+function seedMessage(
+  db: ReturnType<typeof openMemoryDb>,
+  input: { id: string; sessionId: string; index: number; content: string },
+) {
+  db.insert(schema.messages)
+    .values({
+      id: input.id,
+      sessionId: input.sessionId,
+      index: input.index,
+      role: "user",
+      content: input.content,
+      charStart: 0,
+      charEnd: input.content.length,
+      sourceMessageId: null,
+      sourceCreatedAt: null,
+      contentType: "text",
+      attachmentsJson: null,
     })
     .run();
 }
@@ -335,6 +381,84 @@ test("concept failure does not stop other concept sessions or review", async () 
   assert.equal(result.concept.sessions[1]?.failureDiagnostic, null);
   assert.equal(reviewCalls, 1);
   assert.equal(result.review.processorStatus, "completed");
+});
+
+test("fresh canonical preflight blocks only oversized Review after Concept succeeds", async () => {
+  const db = openMemoryDb();
+  seedSession(db, "s-a");
+  seedSession(db, "s-b");
+  let reviewCalls = 0;
+  const oversizedEvidence = "長いEvidenceです。\n".repeat(6_000);
+
+  const result = await executeDualPipelineProcessing(
+    { sessionIds: ["s-a", "s-b"] },
+    {
+      db,
+      initialCoverage: coverageFor(["s-b"]),
+      processConceptSession: async (input) =>
+        conceptResult(input.sessionId, "completed"),
+      loadReviewSessionSources: () => [
+        reviewSource("s-a", oversizedEvidence),
+        reviewSource("s-b", oversizedEvidence),
+      ],
+      processReviewSelection: async () => {
+        reviewCalls += 1;
+        return reviewResult();
+      },
+    },
+  );
+
+  assert.equal(result.concept.sessions[0]?.processorStatus, "completed");
+  assert.equal(result.concept.sessions[1]?.action, "not_needed");
+  assert.equal(result.summary.conceptExecutedCount, 1);
+  assert.equal(result.review.resolvedAction, "blocked");
+  assert.equal(result.review.blockingReason, "review_input_too_long");
+  assert.equal(result.summary.reviewLlmCalls, 0);
+  assert.equal(reviewCalls, 0);
+  assert.equal(result.status, "partial");
+});
+
+test("Plan and provider-bound Review observe the same canonical size for unchanged sources", async () => {
+  const db = openMemoryDb();
+  seedSession(db, "s-a");
+  seedSession(db, "s-b");
+  seedMessage(db, {
+    id: "m-a",
+    sessionId: "s-a",
+    index: 0,
+    content: "PlanとExecutorで同じ入力を測ります。",
+  });
+  seedMessage(db, {
+    id: "m-b",
+    sessionId: "s-b",
+    index: 0,
+    content: "provider境界でも同じcanonical serializerを使います。",
+  });
+  let plannedChars: number | null = null;
+  let providerBoundChars: number | null = null;
+
+  const result = await executeDualPipelineProcessing(
+    { sessionIds: ["s-b", "s-a"] },
+    {
+      db,
+      initialCoverage: coverageFor(["s-a", "s-b"]),
+      loadPlan: (input) => {
+        const plan = loadDualPipelineOrchestratorPlan(input);
+        plannedChars = plan.review.inputPreflight?.serializedChars ?? null;
+        return plan;
+      },
+      processReviewSelection: async (sources) => {
+        providerBoundChars =
+          buildCanonicalReviewEvidenceInput(sources).preflight.serializedChars;
+        return reviewResult({ llmCalls: 0 });
+      },
+    },
+  );
+
+  assert.ok(plannedChars !== null);
+  assert.equal(providerBoundChars, plannedChars);
+  assert.equal(result.review.resolvedAction, "run_for_selection");
+  assert.equal(result.status, "completed");
 });
 
 test("concept failure diagnostics do not invent or expose unsafe tokens", async () => {

@@ -135,6 +135,9 @@ function reviewBlockingCopy(blockingReason: string | null): string | null {
   if (blockingReason === "ambiguous_pending_reviews") {
     return "処理途中のレビューが複数見つかったため、自動では再開できません。";
   }
+  if (blockingReason === "review_input_too_long") {
+    return "対話をまたいだ観測は、選んだ内容が長いため今回は実行できません。";
+  }
   if (blockingReason === "no_selection") {
     return "対話を選んでください。";
   }

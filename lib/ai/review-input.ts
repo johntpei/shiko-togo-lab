@@ -17,7 +17,8 @@ const ANALYZABLE_ROLES = new Set(["user", "assistant"]);
 export type ReviewAnalyzeMessage = Pick<
   MessageRecord,
   "id" | "role" | "content" | "attachmentsJson"
->;
+> &
+  Partial<Pick<MessageRecord, "index">>;
 
 export type ReviewSessionSource = {
   session: Pick<
@@ -47,6 +48,22 @@ export type IntegratedReviewInput = {
   sessionIdByRef: Map<string, string>;
   selectedSessionIds: string[];
   analyzableSessionCount: number;
+  transportSessions: ReviewTransportSession[];
+};
+
+export type ReviewTransportMessage = {
+  messageRef: string;
+  role: EvidenceUnit["role"];
+  units: EvidenceUnit[];
+  hasAttachments: boolean;
+};
+
+export type ReviewTransportSession = ReviewSessionMeta & {
+  messages: ReviewTransportMessage[];
+  auxiliaryAnalysis: {
+    promptVersion: string;
+    text: string;
+  } | null;
 };
 
 function hasAttachments(json: string | null) {
@@ -62,7 +79,18 @@ function hasAttachments(json: string | null) {
 }
 
 function analyzableMessages(messages: ReviewAnalyzeMessage[]) {
-  return messages.filter((message) => ANALYZABLE_ROLES.has(message.role));
+  return messages
+    .map((message, sourceOrder) => ({ message, sourceOrder }))
+    .filter(({ message }) => ANALYZABLE_ROLES.has(message.role))
+    .sort((left, right) => {
+      const leftOrder = left.message.index ?? left.sourceOrder;
+      const rightOrder = right.message.index ?? right.sourceOrder;
+      if (leftOrder !== rightOrder) {
+        return leftOrder - rightOrder;
+      }
+      return left.message.id.localeCompare(right.message.id);
+    })
+    .map(({ message }) => message);
 }
 
 function formatAuxiliaryAnalysis(payload: StoredAnalysisPayload) {
@@ -107,6 +135,7 @@ export function buildIntegratedReviewInput(
   const sessions: ReviewSessionMeta[] = [];
   const sessionIdByRef = new Map<string, string>();
   const blocks: string[] = [];
+  const transportSessions: ReviewTransportSession[] = [];
 
   for (const [sessionIndex, source] of ordered.entries()) {
     const sessionRef = toSessionRef(sessionIndex);
@@ -130,12 +159,15 @@ export function buildIntegratedReviewInput(
     blocks.push(formatOccurredAt(source.session.occurredAt));
     blocks.push("");
 
+    const transportMessages: ReviewTransportMessage[] = [];
+
     for (const [messageIndex, message] of analyzable.entries()) {
       contentByMessageId.set(message.id, message.content);
       const slices = splitMessageIntoEvidenceUnits(message.content);
       const role = toEvidenceRole(message.role);
       const roleLabel = role.toUpperCase();
       const messageRef = toMessageRef(messageIndex);
+      const messageUnits: EvidenceUnit[] = [];
 
       for (const [unitIndex, slice] of slices.entries()) {
         const ref = toEvidenceRef({ sessionIndex, messageIndex, unitIndex });
@@ -150,6 +182,7 @@ export function buildIntegratedReviewInput(
           sessionOccurredAt: source.session.occurredAt,
         };
         units.push(unit);
+        messageUnits.push(unit);
         unitsByRef.set(ref, unit);
         blocks.push(`[${ref}][${roleLabel}]`);
         blocks.push(slice.text);
@@ -160,17 +193,38 @@ export function buildIntegratedReviewInput(
         blocks.push("（添付ファイルあり）");
         blocks.push("");
       }
+      transportMessages.push({
+        messageRef,
+        role,
+        units: messageUnits,
+        hasAttachments: hasAttachments(message.attachmentsJson),
+      });
     }
 
+    let auxiliaryAnalysis: ReviewTransportSession["auxiliaryAnalysis"] = null;
     if (
       source.analysis?.promptVersion === ANALYZE_SESSION_PROMPT_V4 &&
       source.analysis.payload
     ) {
+      const text = formatAuxiliaryAnalysis(source.analysis.payload);
       blocks.push("----- SessionAnalysis (reference only / NOT evidence) -----");
       blocks.push(`promptVersion: ${source.analysis.promptVersion}`);
-      blocks.push(formatAuxiliaryAnalysis(source.analysis.payload));
+      blocks.push(text);
       blocks.push("");
+      auxiliaryAnalysis = {
+        promptVersion: source.analysis.promptVersion,
+        text,
+      };
     }
+
+    transportSessions.push({
+      sessionId: source.session.id,
+      sessionRef,
+      title: source.session.title,
+      occurredAt: source.session.occurredAt,
+      messages: transportMessages,
+      auxiliaryAnalysis,
+    });
   }
 
   return {
@@ -182,6 +236,7 @@ export function buildIntegratedReviewInput(
     sessionIdByRef,
     selectedSessionIds,
     analyzableSessionCount: ordered.length,
+    transportSessions,
   };
 }
 

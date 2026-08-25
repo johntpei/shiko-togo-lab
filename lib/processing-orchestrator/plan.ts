@@ -54,6 +54,7 @@ export function resolveReviewStageAction(input: {
   requestedSessionIds: readonly string[];
   validSessionIds: readonly string[];
   reviewSelectionState: ReviewSelectionState;
+  reviewInputPreflight?: DualPipelineOrchestratorPlanInput["reviewInputPreflight"];
 }): ResolvedReviewStage {
   const requestedSessionIds = uniqueSortedSessionIds(input.requestedSessionIds);
   const validSessionIds = uniqueSortedSessionIds(input.validSessionIds);
@@ -116,6 +117,13 @@ export function resolveReviewStageAction(input: {
         action: "blocked" as const,
         executionReady: false,
         blockingReason: "legacy_review_completion_unknown",
+      };
+    }
+    if (input.reviewInputPreflight && !input.reviewInputPreflight.withinLimit) {
+      return {
+        action: "blocked" as const,
+        executionReady: false,
+        blockingReason: "review_input_too_long",
       };
     }
     return {
@@ -241,6 +249,7 @@ export function buildDualPipelineOrchestratorPlan(
     requestedSessionIds,
     validSessionIds,
     reviewSelectionState: input.reviewSelectionState,
+    reviewInputPreflight: input.reviewInputPreflight,
   });
 
   return {
@@ -271,6 +280,7 @@ export function buildDualPipelineOrchestratorPlan(
       exactLegacyUnknownReviewIds: resolvedReview.exactLegacyUnknownReviewIds,
       coveredSessionIds: reviewCoveredSessionIds,
       uncoveredSessionIds: reviewUncoveredSessionIds,
+      inputPreflight: input.reviewInputPreflight ?? null,
     },
     relation: {
       isPrimaryStage: false,
@@ -314,6 +324,8 @@ export function formatDualPipelineOrchestratorPlan(
     `review.exactLegacyUnknownReviewIds: ${plan.review.exactLegacyUnknownReviewIds.join(",") || "(none)"}`,
     `review.coveredSessionIds: ${plan.review.coveredSessionIds.join(",") || "(none)"}`,
     `review.uncoveredSessionIds: ${plan.review.uncoveredSessionIds.join(",") || "(none)"}`,
+    `review.inputChars: ${plan.review.inputPreflight?.serializedChars ?? "(not measured)"}`,
+    `review.inputWithinLimit: ${plan.review.inputPreflight?.withinLimit ?? "(not measured)"}`,
     `relation.isPrimaryStage: ${plan.relation.isPrimaryStage}`,
     `relation.mode: ${plan.relation.mode}`,
     `workload.conceptExtractionCallsKnown: ${plan.workload.conceptExtractionCallsKnown}`,

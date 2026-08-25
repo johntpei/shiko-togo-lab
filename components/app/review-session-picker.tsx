@@ -7,13 +7,11 @@ import {
   type CreateReviewState,
 } from "@/app/(app)/reviews/actions";
 import { ProcessingPanel } from "@/components/app/processing-panel";
-import { INTEGRATED_REVIEW_MAX_INPUT_CHARS } from "@/lib/ai/limits";
 import {
   canRunIntegratedReviewSelection,
   emptyPickerSelection,
   estimatedReviewChars,
   filterPickerCandidates,
-  formatReviewInputEstimate,
   reviewSelectionHint,
   selectVisibleAnalyzable,
   selectedCandidatesOf,
@@ -77,12 +75,11 @@ export function ReviewSessionPicker({
   const selectedCandidates = selectedCandidatesOf(candidates, selected);
   const selectedCount = selectedCandidates.length;
   const estimatedChars = estimatedReviewChars(selectedCandidates);
-  const overLimit = estimatedChars > INTEGRATED_REVIEW_MAX_INPUT_CHARS;
   const selectionHint = reviewSelectionHint(selectedCount);
   const canSubmit =
     aiReady &&
     !pending &&
-    canRunIntegratedReviewSelection(selectedCount, overLimit);
+    canRunIntegratedReviewSelection(selectedCount, false);
 
   return (
     <div className="mt-8 grid gap-5">
@@ -143,15 +140,10 @@ export function ReviewSessionPicker({
       <div className="rounded-2xl border border-line bg-white px-4 py-3 text-sm">
         <p className="font-bold text-ink">選択中：{selectedCount} Session</p>
         <p className="mt-1 text-muted">
-          入力予定：{formatReviewInputEstimate(estimatedChars)}
+          原文の目安：約 {estimatedChars.toLocaleString()} 文字
         </p>
         {selectionHint ? (
           <p className="mt-2 text-xs font-bold text-amber-800">{selectionHint}</p>
-        ) : null}
-        {overLimit ? (
-          <p className="mt-2 text-xs font-bold text-amber-800">
-            選択したSessionの合計が、現在のMVPでレビューできる上限を超えています。Sessionを減らしてください。
-          </p>
         ) : null}
       </div>
 
@@ -292,7 +284,7 @@ export function ReviewSessionPicker({
         <p className="mt-2 text-xs text-muted">
           Session数：{selectedCount}件
           <span className="mx-2 text-line">/</span>
-          入力：{formatReviewInputEstimate(estimatedChars)}
+          原文の目安：約 {estimatedChars.toLocaleString()} 文字
         </p>
         {state.error ? (
           <p className="mt-2 text-xs font-bold text-rose-700">{state.error}</p>
