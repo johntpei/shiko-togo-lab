@@ -8,21 +8,25 @@ import {
   INTEGRATED_REVIEW_PROMPT_V4,
   INTEGRATED_REVIEW_PROMPT_V5,
   INTEGRATED_REVIEW_PROMPT_V6,
+  INTEGRATED_REVIEW_PROMPT_V7,
   INTEGRATED_REVIEW_PROMPT_VERSION,
   INTEGRATED_REVIEW_SYSTEM_PROMPT,
   INTEGRATED_REVIEW_SYSTEM_PROMPT_V1,
   INTEGRATED_REVIEW_SYSTEM_PROMPT_V4,
   INTEGRATED_REVIEW_SYSTEM_PROMPT_V5,
   INTEGRATED_REVIEW_SYSTEM_PROMPT_V6,
+  INTEGRATED_REVIEW_SYSTEM_PROMPT_V7,
   buildIntegratedReviewUserPromptV5,
   buildIntegratedReviewUserPromptV6,
+  buildIntegratedReviewUserPromptV7,
 } from "./integrated-review";
 
-test("現行 promptVersion は integrated-review-v6", () => {
-  assert.equal(INTEGRATED_REVIEW_PROMPT_VERSION, "integrated-review-v6");
+test("現行 promptVersion は integrated-review-v7", () => {
+  assert.equal(INTEGRATED_REVIEW_PROMPT_VERSION, "integrated-review-v7");
+  assert.equal(INTEGRATED_REVIEW_PROMPT_V7, "integrated-review-v7");
   assert.equal(INTEGRATED_REVIEW_PROMPT_V6, "integrated-review-v6");
   assert.equal(INTEGRATED_REVIEW_PROMPT_V5, "integrated-review-v5");
-  assert.equal(INTEGRATED_REVIEW_SYSTEM_PROMPT, INTEGRATED_REVIEW_SYSTEM_PROMPT_V6);
+  assert.equal(INTEGRATED_REVIEW_SYSTEM_PROMPT, INTEGRATED_REVIEW_SYSTEM_PROMPT_V7);
 });
 
 test("v1〜v5 プロンプトは残している", () => {
@@ -55,6 +59,31 @@ test("v6 は v5 semantic policyを維持してtransport参照だけalias化す�
   assert.match(user, /evidenceAliases/);
   assert.match(user, /UはUSER、AはASSISTANT/);
   assert.match(user, /一字も変えず/);
+});
+
+test("v7 は v6 semantic policyを維持しalias exact-copy contractだけを強化する", () => {
+  for (const semantic of [
+    "Claimを先に考え、後からEvidenceを探してはいけない",
+    "PHASE A",
+    "PHASE B",
+    "PHASE C",
+    "2 Session 未満の Theme / Tension / Insight / Hypothesis は出さない",
+  ]) {
+    assert.match(INTEGRATED_REVIEW_SYSTEM_PROMPT_V6, new RegExp(semantic));
+    assert.match(INTEGRATED_REVIEW_SYSTEM_PROMPT_V7, new RegExp(semantic));
+  }
+  const user = buildIntegratedReviewUserPromptV7(
+    "#S\tS01\n#M\tM001\tU\n0A\tEvidence本文",
+    2,
+  );
+  assert.match(user, /正確に 2 文字/);
+  assert.match(user, /0-9、A-Z、a-z/);
+  assert.match(user, /大文字と小文字は区別/);
+  assert.match(user, /prefix、括弧、引用符、前後の空白を追加しない/);
+  assert.match(user, /旧形式のSession\/Message\/Evidence参照/);
+  assert.match(user, /入力のEvidence行に実在するaliasだけ/);
+  assert.doesNotMatch(user, /EvidenceRef/);
+  assert.doesNotMatch(user, /S01:M003:E02/);
 });
 
 test("v5 は Evidence-first でありプロジェクト名をハードコードしない", () => {

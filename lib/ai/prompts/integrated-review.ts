@@ -7,7 +7,8 @@ export const INTEGRATED_REVIEW_PROMPT_V3 = "integrated-review-v3";
 export const INTEGRATED_REVIEW_PROMPT_V4 = "integrated-review-v4";
 export const INTEGRATED_REVIEW_PROMPT_V5 = "integrated-review-v5";
 export const INTEGRATED_REVIEW_PROMPT_V6 = "integrated-review-v6";
-export const INTEGRATED_REVIEW_PROMPT_VERSION = INTEGRATED_REVIEW_PROMPT_V6;
+export const INTEGRATED_REVIEW_PROMPT_V7 = "integrated-review-v7";
+export const INTEGRATED_REVIEW_PROMPT_VERSION = INTEGRATED_REVIEW_PROMPT_V7;
 
 export const INTEGRATED_REVIEW_SYSTEM_PROMPT_V1 = `あなたは、複数の対話Sessionを横断して「まだ本人が気づいていなかったつながり」を見つけるアシスタントです。
 与えられた Session / Evidence Units 以外の情報は使いません。Web検索や一般知識での補完もしません。
@@ -501,7 +502,17 @@ function toCompactAliasTransportPrompt(v5: string) {
 export const INTEGRATED_REVIEW_SYSTEM_PROMPT_V6 =
   toCompactAliasTransportPrompt(INTEGRATED_REVIEW_SYSTEM_PROMPT_V5);
 
-export const INTEGRATED_REVIEW_SYSTEM_PROMPT = INTEGRATED_REVIEW_SYSTEM_PROMPT_V6;
+export const INTEGRATED_REVIEW_SYSTEM_PROMPT_V7 = `${INTEGRATED_REVIEW_SYSTEM_PROMPT_V6}
+
+# EvidenceAlias v7 exact-copy contract
+- EvidenceAlias は、入力の各Evidence行の先頭にあるASCII文字列です。
+- 大文字と小文字を区別し、入力にある文字列を一字も変えずにコピーしてください。
+- prefix、括弧、引用符、空白を追加しないでください。
+- 旧形式のSession/Message/Evidence参照をEvidenceAliasとして返さないでください。
+- 文法的に正しいだけでは不十分です。入力に実在するEvidenceAliasだけを使ってください。
+`;
+
+export const INTEGRATED_REVIEW_SYSTEM_PROMPT = INTEGRATED_REVIEW_SYSTEM_PROMPT_V7;
 
 export function buildIntegratedReviewUserPrompt(labeledTranscript: string) {
   return `次の複数 Session の Evidence Units だけを横断分析してください。
@@ -609,6 +620,42 @@ Evidence本文内の改行・復帰・タブは、それぞれ↵・␍・↹と
 #Fは添付ありの印でEvidenceではありません。#XはSessionAnalysisであり参考情報のみ、Evidenceではありません。
 
 ${currentContextBlock}
+
+${compactEvidence}`;
+}
+
+function currentContextForAliasV7(currentContextBlock: string) {
+  return currentContextBlock.replaceAll("EvidenceRef", "EvidenceAlias");
+}
+
+export function buildIntegratedReviewUserPromptV7(
+  compactEvidence: string,
+  aliasWidth: number,
+  currentContextBlock: string = formatCurrentContextBlock(),
+) {
+  return `次の複数 Session の Evidence Units を、Evidence-first で横断分析してください。
+
+先に異なるSessionから関連Evidenceをグループ化し、関係を見てから Claim を書いてください。
+Claimを先に考えないでください。2 Session分の実在Evidenceが無ければそのitemは出さないでください。
+存在しない EvidenceAlias を作らないでください。Current Context は Evidence ではありません。
+commonThemes / crossInsights / hypotheses は evidenceGroups を必須とし、同じaliasを evidenceAliases にも列挙してください。
+tensions は sideA と sideB を異なるSessionのEvidenceで先に固めてください。
+Hypothesis には rationale と validationIdea。nextQuestions は今回の発見から作ってください。「次のステップは何か？」は禁止です。
+
+# Compact EvidenceAlias v7 contract
+#S はSession境界、#Tはタイトル、#Dは日付です。
+#M はMessage順とroleを表し、UはUSER、AはASSISTANTです。
+各Evidence行は「ASCII EvidenceAlias、タブ、Evidence本文」です。
+このrequestのEvidenceAliasはすべて正確に ${aliasWidth} 文字です。
+使用可能な文字は 0-9、A-Z、a-z です。大文字と小文字は区別されます。
+文法に合う任意の値ではなく、入力のEvidence行に実在するaliasだけを一字も変えずにコピーしてください。
+prefix、括弧、引用符、前後の空白を追加しないでください。
+旧形式のSession/Message/Evidence参照をEvidenceAliasとして返さないでください。
+Evidence本文内の改行・復帰・タブは、それぞれ↵・␍・↹と表記されます。これらは本文の文字を削除する記号ではありません。
+出力ではEvidence本文を書かず、各 evidenceAliases fieldにはEvidenceAliasだけを入れてください。
+#Fは添付ありの印でEvidenceではありません。#XはSessionAnalysisであり参考情報のみ、Evidenceではありません。
+
+${currentContextForAliasV7(currentContextBlock)}
 
 ${compactEvidence}`;
 }

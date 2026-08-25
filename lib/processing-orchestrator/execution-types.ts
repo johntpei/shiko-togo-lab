@@ -1,5 +1,6 @@
 import type { IncrementalConceptSessionProcessorResult } from "@/lib/concepts/incremental/session-processor";
 import type { IntegratedReviewProcessingResult } from "@/lib/reviews/integrated-review-processor";
+import type { ReviewGroundingFailureDiagnostic } from "@/lib/ai/tasks/integrated-review";
 import type { ReviewStageAction } from "./types";
 
 export const DUAL_PIPELINE_ORCHESTRATOR_EXECUTION_VERSION =
@@ -58,6 +59,7 @@ export type DualPipelineReviewFailureDiagnostic = {
   failureReason: string | null;
   failureCode: string | null;
   llmCalls: number;
+  groundingDiagnostic?: ReviewGroundingFailureDiagnostic;
 };
 
 const SAFE_REVIEW_FAILURE_TOKENS = new Set([
@@ -75,6 +77,8 @@ const SAFE_REVIEW_FAILURE_TOKENS = new Set([
   "unsupported_review_version",
   "invalid_payload",
   "observation_projection_failed",
+  "evidence_validation_failed",
+  "all_review_evidence_invalid",
 ]);
 
 export function sanitizeDualPipelineReviewFailureToken(

@@ -37,6 +37,23 @@ export type CompactReviewEvidencePreflight = Pick<
   withinLimit: boolean;
 };
 
+export type ReviewEvidenceAliasDiagnostics = {
+  totalAliasReferences: number;
+  uniqueReturnedAliasCount: number;
+  expectedAliasWidth: number;
+  base62OnlyCount: number;
+  expectedWidthCount: number;
+  exactMemberCount: number;
+  nonBase62Count: number;
+  unexpectedLengthCount: number;
+  leadingOrTrailingWhitespaceCount: number;
+  legacyEvidenceRefShapeCount: number;
+  wrapperShapeCount: number;
+  trimmedExactMemberCount: number;
+  caseInsensitiveMemberCount: number;
+  unwrappedExactMemberCount: number;
+};
+
 function aliasWidthForCount(count: number) {
   if (!Number.isSafeInteger(count) || count < 0) {
     throw new Error("Review Evidence count must be a non-negative safe integer");
@@ -74,6 +91,105 @@ export function isReviewEvidenceAliasLexicallySafe(alias: string) {
   return [...alias].every((char) =>
     REVIEW_EVIDENCE_ALIAS_ALPHABET.includes(char),
   );
+}
+
+const LEGACY_REVIEW_EVIDENCE_REF_PATTERN = /^S\d+:M\d+:E\d+$/;
+const ALIAS_WRAPPERS = new Map([
+  ["[", "]"],
+  ["(", ")"],
+  ["{", "}"],
+  ["<", ">"],
+  ['"', '"'],
+  ["'", "'"],
+  ["`", "`"],
+]);
+
+function unwrappedAlias(alias: string): string | null {
+  if (alias.length < 2) {
+    return null;
+  }
+  const expectedClose = ALIAS_WRAPPERS.get(alias[0]!);
+  if (!expectedClose || alias.at(-1) !== expectedClose) {
+    return null;
+  }
+  return alias.slice(1, -1);
+}
+
+/**
+ * Safe diagnostics for model-returned aliases. Raw values are used only for
+ * in-memory counts and are never included in the returned structure.
+ */
+export function diagnoseReviewEvidenceAliases(
+  aliases: readonly string[],
+  transport: Pick<
+    CompactReviewEvidenceTransport,
+    "aliasWidth" | "evidenceByAlias"
+  >,
+): ReviewEvidenceAliasDiagnostics {
+  const canonicalLowercase = new Set(
+    [...transport.evidenceByAlias.keys()].map((alias) => alias.toLowerCase()),
+  );
+  let base62OnlyCount = 0;
+  let expectedWidthCount = 0;
+  let exactMemberCount = 0;
+  let leadingOrTrailingWhitespaceCount = 0;
+  let legacyEvidenceRefShapeCount = 0;
+  let wrapperShapeCount = 0;
+  let trimmedExactMemberCount = 0;
+  let caseInsensitiveMemberCount = 0;
+  let unwrappedExactMemberCount = 0;
+
+  for (const alias of aliases) {
+    const exact = transport.evidenceByAlias.has(alias);
+    if (isReviewEvidenceAliasLexicallySafe(alias)) {
+      base62OnlyCount += 1;
+    }
+    if (alias.length === transport.aliasWidth) {
+      expectedWidthCount += 1;
+    }
+    if (exact) {
+      exactMemberCount += 1;
+    }
+
+    const trimmed = alias.trim();
+    if (trimmed !== alias) {
+      leadingOrTrailingWhitespaceCount += 1;
+      if (!exact && transport.evidenceByAlias.has(trimmed)) {
+        trimmedExactMemberCount += 1;
+      }
+    }
+    if (LEGACY_REVIEW_EVIDENCE_REF_PATTERN.test(alias)) {
+      legacyEvidenceRefShapeCount += 1;
+    }
+
+    const unwrapped = unwrappedAlias(alias);
+    if (unwrapped !== null) {
+      wrapperShapeCount += 1;
+      if (!exact && transport.evidenceByAlias.has(unwrapped)) {
+        unwrappedExactMemberCount += 1;
+      }
+    }
+    if (!exact && canonicalLowercase.has(alias.toLowerCase())) {
+      caseInsensitiveMemberCount += 1;
+    }
+  }
+
+  return {
+    totalAliasReferences: aliases.length,
+    uniqueReturnedAliasCount: new Set(aliases).size,
+    expectedAliasWidth: transport.aliasWidth,
+    base62OnlyCount,
+    expectedWidthCount,
+    exactMemberCount,
+    nonBase62Count: aliases.length - base62OnlyCount,
+    unexpectedLengthCount: aliases.length - expectedWidthCount,
+    leadingOrTrailingWhitespaceCount,
+    legacyEvidenceRefShapeCount,
+    wrapperShapeCount,
+    trimmedExactMemberCount,
+    caseInsensitiveMemberCount,
+    unwrappedExactMemberCount,
+  };
 }
 
 const COMPACT_TEXT_ESCAPE = "␛";

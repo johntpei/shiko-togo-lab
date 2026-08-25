@@ -6,6 +6,7 @@ import {
   REVIEW_EVIDENCE_TRANSPORT_VERSION,
   buildCanonicalReviewEvidenceInput,
   decodeCompactReviewEvidenceText,
+  diagnoseReviewEvidenceAliases,
   encodeCompactReviewEvidenceText,
   exactEvidenceRefForAlias,
   isReviewEvidenceAliasLexicallySafe,
@@ -192,4 +193,54 @@ test("alias resolution does not bypass the exact source substring guard", () => 
   );
   assert.equal(resolved.validated, false);
   assert.equal(resolved.reason, "quote_not_found");
+});
+
+test("alias shape diagnostics are aggregate-only and never normalize lookup", () => {
+  const messages = Array.from({ length: 11 }, (_, index) =>
+    message(`m-${index}`, index, "user", `Evidence ${index} の本文です。`),
+  );
+  const { transport } = buildCanonicalReviewEvidenceInput([
+    source("a", "2026-07-01", messages),
+  ]);
+  const letterAlias = [...transport.evidenceByAlias.keys()].find(
+    (alias) => alias === "A",
+  );
+  assert.ok(letterAlias);
+
+  const rawAliases = [
+    letterAlias,
+    letterAlias.toLowerCase(),
+    `${letterAlias} `,
+    `[${letterAlias}]`,
+    "S01:M001:E01",
+    "!",
+    "AA",
+  ];
+  const diagnostic = diagnoseReviewEvidenceAliases(rawAliases, transport);
+
+  assert.deepEqual(diagnostic, {
+    totalAliasReferences: 7,
+    uniqueReturnedAliasCount: 7,
+    expectedAliasWidth: 1,
+    base62OnlyCount: 3,
+    expectedWidthCount: 3,
+    exactMemberCount: 1,
+    nonBase62Count: 4,
+    unexpectedLengthCount: 4,
+    leadingOrTrailingWhitespaceCount: 1,
+    legacyEvidenceRefShapeCount: 1,
+    wrapperShapeCount: 1,
+    trimmedExactMemberCount: 1,
+    caseInsensitiveMemberCount: 1,
+    unwrappedExactMemberCount: 1,
+  });
+  assert.equal(
+    exactEvidenceRefForAlias(`${letterAlias} `, transport.evidenceByAlias),
+    INVALID_REVIEW_EVIDENCE_ALIAS_REF,
+  );
+  assert.equal(
+    exactEvidenceRefForAlias(`[${letterAlias}]`, transport.evidenceByAlias),
+    INVALID_REVIEW_EVIDENCE_ALIAS_REF,
+  );
+  assert.doesNotMatch(JSON.stringify(diagnostic), /S01|M001|E01/);
 });

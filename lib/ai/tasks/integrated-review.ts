@@ -16,16 +16,17 @@ import {
 import {
   INTEGRATED_REVIEW_PROMPT_VERSION,
   INTEGRATED_REVIEW_SYSTEM_PROMPT,
-  buildIntegratedReviewUserPromptV6,
+  buildIntegratedReviewUserPromptV7,
 } from "../prompts/integrated-review";
 import type { AiProvider } from "../provider";
 import type { ReviewSessionSource } from "../review-input";
 import type { EvidenceUnit } from "../evidence-units";
 import {
   defaultReviewSettings,
-  integratedReviewV6OutputSchema,
+  INTEGRATED_REVIEW_SCHEMA_NAME,
+  integratedReviewV7OutputSchema,
   type IntegratedReviewV5Output,
-  type IntegratedReviewV6Output,
+  type IntegratedReviewV7Output,
   type StoredReviewEvidence,
   type StoredReviewItem,
   type StoredReviewPayload,
@@ -35,7 +36,9 @@ import {
 import {
   REVIEW_EVIDENCE_TRANSPORT_VERSION,
   buildCanonicalReviewEvidenceInput,
+  diagnoseReviewEvidenceAliases,
   exactEvidenceRefForAlias,
+  type ReviewEvidenceAliasDiagnostics,
 } from "../review-evidence-transport";
 import { textsAreNearDuplicates } from "../review-quality";
 import {
@@ -68,7 +71,50 @@ export type IntegratedReviewResult =
       reviewId: string;
       relationReconciliation?: ObservationConceptRelationLifecycleResult;
     }
-  | { ok: false; error: string; code: string };
+  | {
+      ok: false;
+      error: string;
+      code: string;
+      reason?: string;
+      groundingDiagnostic?: ReviewGroundingFailureDiagnostic;
+    };
+
+export type ReviewGroundingFailureDiagnostic = {
+  aliasAttemptCount: number;
+  resolvedAliasCount: number;
+  aliasDiagnostics: ReviewEvidenceAliasDiagnostics;
+  usableValidatedEvidenceCount: number;
+};
+
+export function evaluateReviewGroundingValidity(input: {
+  aliasAttemptCount: number;
+  items: Array<{
+    evidence: Array<{
+      validated: boolean;
+      evidenceRef?: string | null;
+      messageId: string | null;
+      sessionId?: string | null;
+    }>;
+  }>;
+}) {
+  const usableValidatedEvidenceCount = input.items.reduce(
+    (count, item) =>
+      count +
+      item.evidence.filter(
+        (evidence) =>
+          evidence.validated &&
+          Boolean(evidence.evidenceRef) &&
+          Boolean(evidence.messageId) &&
+          Boolean(evidence.sessionId),
+      ).length,
+    0,
+  );
+  return {
+    usableValidatedEvidenceCount,
+    valid:
+      input.aliasAttemptCount === 0 || usableValidatedEvidenceCount > 0,
+  };
+}
 
 export type IntegratedReviewSaveInput = {
   title: string;
@@ -98,8 +144,8 @@ function normalizeAliasList(
   );
 }
 
-function normalizeIntegratedReviewV6Output(
-  output: IntegratedReviewV6Output,
+function normalizeIntegratedReviewAliasOutput(
+  output: IntegratedReviewV7Output,
   evidenceByAlias: ReadonlyMap<string, EvidenceUnit>,
 ): IntegratedReviewV5Output {
   const groups = (
@@ -162,6 +208,46 @@ function normalizeIntegratedReviewV6Output(
       evidenceRefs: normalizeAliasList(item.evidenceAliases, evidenceByAlias),
     })),
   };
+}
+
+function collectReturnedEvidenceAliases(output: IntegratedReviewV7Output) {
+  const aliases: string[] = [];
+  const addGrouped = (item: {
+    evidenceGroups: Array<{ evidenceAliases: string[] }>;
+    evidenceAliases: string[];
+  }) => {
+    for (const group of item.evidenceGroups) {
+      aliases.push(...group.evidenceAliases);
+    }
+    aliases.push(...item.evidenceAliases);
+  };
+
+  for (const item of output.commonThemes) {
+    addGrouped(item);
+  }
+  for (const item of output.shifts) {
+    aliases.push(
+      ...item.beforeEvidenceAliases,
+      ...item.afterEvidenceAliases,
+    );
+  }
+  for (const item of output.tensions) {
+    addGrouped(item);
+    aliases.push(...item.sideA.evidenceAliases, ...item.sideB.evidenceAliases);
+  }
+  for (const item of output.crossInsights) {
+    addGrouped(item);
+  }
+  for (const item of output.hypotheses) {
+    addGrouped(item);
+  }
+  for (const item of output.openQuestions) {
+    aliases.push(...item.evidenceAliases);
+  }
+  for (const item of output.nextQuestions) {
+    aliases.push(...item.evidenceAliases);
+  }
+  return aliases;
 }
 
 function toStoredEvidence(evidence: ValidatedEvidence): StoredReviewEvidence {
@@ -268,9 +354,12 @@ export async function runIntegratedReview(
     const generated = await deps.generateStructured({
       model: config.model,
       system: INTEGRATED_REVIEW_SYSTEM_PROMPT,
-      user: buildIntegratedReviewUserPromptV6(transport.serializedEvidence),
-      schema: integratedReviewV6OutputSchema,
-      schemaName: "integrated_review_v6",
+      user: buildIntegratedReviewUserPromptV7(
+        transport.serializedEvidence,
+        transport.aliasWidth,
+      ),
+      schema: integratedReviewV7OutputSchema,
+      schemaName: INTEGRATED_REVIEW_SCHEMA_NAME,
       timeoutMs: INTEGRATED_REVIEW_TIMEOUT_MS,
     });
     parsedUnknown = generated.parsed;
@@ -289,7 +378,7 @@ export async function runIntegratedReview(
     };
   }
 
-  const parsed = integratedReviewV6OutputSchema.safeParse(parsedUnknown);
+  const parsed = integratedReviewV7OutputSchema.safeParse(parsedUnknown);
   if (!parsed.success) {
     return {
       ok: false,
@@ -297,7 +386,12 @@ export async function runIntegratedReview(
       error: "分析結果の形式が不正だったため保存しませんでした。",
     };
   }
-  const normalized = normalizeIntegratedReviewV6Output(
+  const returnedAliases = collectReturnedEvidenceAliases(parsed.data);
+  const aliasDiagnostics = diagnoseReviewEvidenceAliases(
+    returnedAliases,
+    transport,
+  );
+  const normalized = normalizeIntegratedReviewAliasOutput(
     parsed.data,
     transport.evidenceByAlias,
   );
@@ -473,6 +567,27 @@ export async function runIntegratedReview(
     ...openQuestions,
     ...nextQuestions,
   ];
+
+  const groundingValidity = evaluateReviewGroundingValidity({
+    aliasAttemptCount: aliasDiagnostics.totalAliasReferences,
+    items: allItems,
+  });
+
+  if (!groundingValidity.valid) {
+    return {
+      ok: false,
+      code: "all_review_evidence_invalid",
+      reason: "evidence_validation_failed",
+      error: "観測結果の根拠を確認できなかったため、保存しませんでした。",
+      groundingDiagnostic: {
+        aliasAttemptCount: aliasDiagnostics.totalAliasReferences,
+        resolvedAliasCount: aliasDiagnostics.exactMemberCount,
+        aliasDiagnostics,
+        usableValidatedEvidenceCount:
+          groundingValidity.usableValidatedEvidenceCount,
+      },
+    };
+  }
 
   if (process.env.NODE_ENV !== "production") {
     for (const item of allItems) {

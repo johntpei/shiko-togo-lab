@@ -470,6 +470,47 @@ test("execution presentation exposes safe Review too_long diagnostics with human
   result.review.failureDiagnostic = {
     status: "failed",
     executionMode: "fresh",
+    failureReason: "evidence_validation_failed",
+    failureCode: "all_review_evidence_invalid",
+    llmCalls: 1,
+    groundingDiagnostic: {
+      aliasAttemptCount: 2,
+      resolvedAliasCount: 0,
+      aliasDiagnostics: {
+        totalAliasReferences: 2,
+        uniqueReturnedAliasCount: 1,
+        expectedAliasWidth: 2,
+        base62OnlyCount: 2,
+        expectedWidthCount: 0,
+        exactMemberCount: 0,
+        nonBase62Count: 0,
+        unexpectedLengthCount: 2,
+        leadingOrTrailingWhitespaceCount: 0,
+        legacyEvidenceRefShapeCount: 0,
+        wrapperShapeCount: 0,
+        trimmedExactMemberCount: 0,
+        caseInsensitiveMemberCount: 0,
+        unwrappedExactMemberCount: 0,
+      },
+      usableValidatedEvidenceCount: 0,
+    },
+  };
+  const groundingFailure = buildProcessingExecutionPresentation(result);
+  assert.equal(
+    groundingFailure.reviewFailure?.message,
+    "観測結果の根拠を確認できなかったため、保存しませんでした。",
+  );
+  assert.equal(
+    groundingFailure.reviewFailure?.groundingDiagnostic?.aliasDiagnostics
+      .unexpectedLengthCount,
+    2,
+  );
+  assert.doesNotMatch(JSON.stringify(groundingFailure), /returnedAlias/);
+  assert.doesNotMatch(JSON.stringify(groundingFailure), /Evidence本文/);
+
+  result.review.failureDiagnostic = {
+    status: "failed",
+    executionMode: "fresh",
     failureReason: "secret_like_unknown_reason",
     failureCode: "secret_like_unknown_code",
     llmCalls: 0,

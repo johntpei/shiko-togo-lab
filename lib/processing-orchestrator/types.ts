@@ -128,6 +128,12 @@ export type DualPipelineOrchestratorPlan = {
     coveredSessionIds: string[];
     uncoveredSessionIds: string[];
     inputPreflight: ReviewInputPreflight | null;
+    targetVersions: {
+      prompt: string;
+      schema: string;
+      processing: string;
+      transport: string;
+    };
   };
   relation: {
     isPrimaryStage: false;

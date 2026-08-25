@@ -4,6 +4,7 @@ import {
   runIntegratedReview,
   type IntegratedReviewResult,
   type IntegratedReviewSaveInput,
+  type ReviewGroundingFailureDiagnostic,
 } from "@/lib/ai/tasks/integrated-review";
 import { getAiProvider } from "@/lib/ai/provider";
 import { AnalyzeSessionError } from "@/lib/ai/errors";
@@ -46,6 +47,7 @@ export type IntegratedReviewProcessingResult = {
     code: string | null;
   };
   relationReconciliation: ObservationConceptRelationLifecycleResult | null;
+  groundingDiagnostic?: ReviewGroundingFailureDiagnostic | null;
 };
 
 export type ProcessIntegratedReviewSelectionDeps = {
@@ -60,14 +62,24 @@ export type ProcessIntegratedReviewSelectionDeps = {
 
 function toIntegratedReviewResult(
   saved: IntegratedReviewResult,
-): Pick<IntegratedReviewProcessingResult, "status" | "reviewId" | "reason" | "code" | "llmCalls"> {
+  llmCalls: number,
+): Pick<
+  IntegratedReviewProcessingResult,
+  | "status"
+  | "reviewId"
+  | "reason"
+  | "code"
+  | "llmCalls"
+  | "groundingDiagnostic"
+> {
   if (!saved.ok) {
     return {
       status: saved.code === "save" ? "failed" : "failed",
       reviewId: null,
-      reason: saved.error,
+      reason: saved.reason ?? saved.error,
       code: saved.code,
-      llmCalls: saved.code === "save" ? 1 : 0,
+      llmCalls,
+      groundingDiagnostic: saved.groundingDiagnostic ?? null,
     };
   }
   return {
@@ -75,7 +87,8 @@ function toIntegratedReviewResult(
     reviewId: saved.reviewId,
     reason: null,
     code: null,
-    llmCalls: 1,
+    llmCalls,
+    groundingDiagnostic: null,
   };
 }
 
@@ -93,22 +106,23 @@ export async function processIntegratedReviewSelection(
 
   let llmCalls = 0;
   const provider = getAiProvider();
+  const generateStructured =
+    deps.generateStructured ??
+    ((request: Parameters<AiProvider["generateStructured"]>[0]) =>
+      provider.generateStructured(request));
   const generated = await runIntegratedReview(sources, title, {
-    generateStructured:
-      deps.generateStructured ??
-      ((request) => provider.generateStructured(request)),
-    save: (input) => {
+    generateStructured: async (request) => {
       llmCalls += 1;
-      return saveReview(input);
+      return generateStructured(request);
     },
+    save: (input) => saveReview(input),
   });
 
   if (!generated.ok) {
-    const base = toIntegratedReviewResult(generated);
+    const base = toIntegratedReviewResult(generated, llmCalls);
     return {
       ...base,
       executionMode: "fresh",
-      llmCalls: generated.code === "save" ? 1 : 0,
       projection: {
         status: "not_run",
         observationCount: 0,

@@ -250,6 +250,24 @@ export function ProcessingPanel({
                       {executeState.result.reviewFailure.llmCalls}
                     </dd>
                   </div>
+                  {executeState.result.reviewFailure.groundingDiagnostic ? (
+                    <div>
+                      <dt className="font-bold">根拠確認（件数のみ）:</dt>
+                      <dd className="mt-1 pl-3">
+                        参照試行 {executeState.result.reviewFailure.groundingDiagnostic.aliasAttemptCount}
+                        件 / 一致 {executeState.result.reviewFailure.groundingDiagnostic.resolvedAliasCount}
+                        件 / 利用可能 {executeState.result.reviewFailure.groundingDiagnostic.usableValidatedEvidenceCount}
+                        件
+                        <br />
+                        文字数不一致 {executeState.result.reviewFailure.groundingDiagnostic.aliasDiagnostics.unexpectedLengthCount}
+                        件 / 使用不可文字 {executeState.result.reviewFailure.groundingDiagnostic.aliasDiagnostics.nonBase62Count}
+                        件 / 前後空白 {executeState.result.reviewFailure.groundingDiagnostic.aliasDiagnostics.leadingOrTrailingWhitespaceCount}
+                        件 / 旧形式 {executeState.result.reviewFailure.groundingDiagnostic.aliasDiagnostics.legacyEvidenceRefShapeCount}
+                        件 / wrapper形状 {executeState.result.reviewFailure.groundingDiagnostic.aliasDiagnostics.wrapperShapeCount}
+                        件
+                      </dd>
+                    </div>
+                  ) : null}
                 </dl>
               </details>
             </div>

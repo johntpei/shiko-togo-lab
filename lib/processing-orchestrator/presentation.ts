@@ -7,6 +7,7 @@ import type {
   DualPipelineOrchestratorPlan,
   ReviewStageAction,
 } from "./types";
+import type { ReviewGroundingFailureDiagnostic } from "@/lib/ai/tasks/integrated-review";
 import { uniqueSortedSessionIds } from "./plan";
 
 export const PROCESSING_PLAN_PRESENTATION_VERSION =
@@ -72,11 +73,18 @@ export type ProcessingReviewFailurePresentation = {
   failureCode: string | null;
   llmCalls: number;
   message: string;
+  groundingDiagnostic?: ReviewGroundingFailureDiagnostic;
 };
 
 function reviewFailureMessage(code: string | null, reason: string | null) {
   if (code === "too_long" || reason === "too_long") {
     return "選んだ対話の内容が長いため、対話をまたいだ観測を作成できませんでした。";
+  }
+  if (
+    code === "all_review_evidence_invalid" ||
+    reason === "evidence_validation_failed"
+  ) {
+    return "観測結果の根拠を確認できなかったため、保存しませんでした。";
   }
   return "対話をまたいだ観測を完了できませんでした。";
 }
@@ -99,6 +107,9 @@ function processingReviewFailure(
     failureCode,
     llmCalls: diagnostic.llmCalls,
     message: reviewFailureMessage(failureCode, failureReason),
+    ...(diagnostic.groundingDiagnostic
+      ? { groundingDiagnostic: diagnostic.groundingDiagnostic }
+      : {}),
   };
 }
 

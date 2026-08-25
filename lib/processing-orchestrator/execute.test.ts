@@ -584,6 +584,62 @@ test("Review diagnostics discard unknown and unsafe processor information", asyn
   });
 });
 
+test("Review all-grounding-invalid diagnostics propagate as aggregate counts only", async () => {
+  const db = openMemoryDb();
+  seedSession(db, "s-a");
+  seedSession(db, "s-b");
+  const result = await executeDualPipelineProcessing(
+    { sessionIds: ["s-a", "s-b"] },
+    {
+      db,
+      initialCoverage: coverageFor(["s-a", "s-b"]),
+      processReviewSelection: async () =>
+        reviewResult({
+          status: "failed",
+          reviewId: null,
+          llmCalls: 1,
+          reason: "evidence_validation_failed",
+          code: "all_review_evidence_invalid",
+          groundingDiagnostic: {
+            aliasAttemptCount: 2,
+            resolvedAliasCount: 0,
+            aliasDiagnostics: {
+              totalAliasReferences: 2,
+              uniqueReturnedAliasCount: 1,
+              expectedAliasWidth: 2,
+              base62OnlyCount: 2,
+              expectedWidthCount: 0,
+              exactMemberCount: 0,
+              nonBase62Count: 0,
+              unexpectedLengthCount: 2,
+              leadingOrTrailingWhitespaceCount: 0,
+              legacyEvidenceRefShapeCount: 0,
+              wrapperShapeCount: 0,
+              trimmedExactMemberCount: 0,
+              caseInsensitiveMemberCount: 0,
+              unwrappedExactMemberCount: 0,
+            },
+            usableValidatedEvidenceCount: 0,
+          },
+          projection: {
+            status: "not_run",
+            observationCount: 0,
+            code: null,
+          },
+        }),
+    },
+  );
+
+  assert.equal(result.review.failureDiagnostic?.failureCode, "all_review_evidence_invalid");
+  assert.equal(
+    result.review.failureDiagnostic?.groundingDiagnostic?.aliasDiagnostics
+      .unexpectedLengthCount,
+    2,
+  );
+  const serialized = JSON.stringify(result.review.failureDiagnostic);
+  assert.doesNotMatch(serialized, /SECRET_USER|Evidence本文|S01:M001:E01/);
+});
+
 test("one session executes concept and blocks review minimum", async () => {
   const db = openMemoryDb();
   seedSession(db, "s-a");

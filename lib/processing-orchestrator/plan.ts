@@ -1,4 +1,8 @@
 import { MIN_INTEGRATED_REVIEW_SESSIONS } from "@/lib/ai/limits";
+import { INTEGRATED_REVIEW_PROMPT_VERSION } from "@/lib/ai/prompts/integrated-review";
+import { REVIEW_EVIDENCE_TRANSPORT_VERSION } from "@/lib/ai/review-evidence-transport";
+import { INTEGRATED_REVIEW_SCHEMA_NAME } from "@/lib/ai/review-schemas";
+import { INTEGRATED_REVIEW_PROCESSING_VERSION } from "@/lib/reviews/review-run-types";
 import {
   DUAL_PIPELINE_ORCHESTRATOR_CODE_FACTS,
   DUAL_PIPELINE_ORCHESTRATOR_PLAN_VERSION,
@@ -281,6 +285,12 @@ export function buildDualPipelineOrchestratorPlan(
       coveredSessionIds: reviewCoveredSessionIds,
       uncoveredSessionIds: reviewUncoveredSessionIds,
       inputPreflight: input.reviewInputPreflight ?? null,
+      targetVersions: {
+        prompt: INTEGRATED_REVIEW_PROMPT_VERSION,
+        schema: INTEGRATED_REVIEW_SCHEMA_NAME,
+        processing: INTEGRATED_REVIEW_PROCESSING_VERSION,
+        transport: REVIEW_EVIDENCE_TRANSPORT_VERSION,
+      },
     },
     relation: {
       isPrimaryStage: false,
@@ -326,6 +336,10 @@ export function formatDualPipelineOrchestratorPlan(
     `review.uncoveredSessionIds: ${plan.review.uncoveredSessionIds.join(",") || "(none)"}`,
     `review.inputChars: ${plan.review.inputPreflight?.serializedChars ?? "(not measured)"}`,
     `review.inputWithinLimit: ${plan.review.inputPreflight?.withinLimit ?? "(not measured)"}`,
+    `review.targetPrompt: ${plan.review.targetVersions.prompt}`,
+    `review.targetSchema: ${plan.review.targetVersions.schema}`,
+    `review.targetProcessing: ${plan.review.targetVersions.processing}`,
+    `review.targetTransport: ${plan.review.targetVersions.transport}`,
     `relation.isPrimaryStage: ${plan.relation.isPrimaryStage}`,
     `relation.mode: ${plan.relation.mode}`,
     `workload.conceptExtractionCallsKnown: ${plan.workload.conceptExtractionCallsKnown}`,

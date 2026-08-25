@@ -10,6 +10,11 @@ import { INTEGRATED_REVIEW_PROMPT_VERSION } from "../prompts/integrated-review";
 import { ANALYZE_SESSION_PROMPT_V4 } from "../prompts/analyze-session";
 import type { ReviewSessionSource } from "../review-input";
 import {
+  INTEGRATED_REVIEW_SCHEMA_NAME,
+  integratedReviewV7OutputSchema,
+} from "../review-schemas";
+import {
+  evaluateReviewGroundingValidity,
   runIntegratedReview as runIntegratedReviewProduction,
   type IntegratedReviewDeps,
 } from "./integrated-review";
@@ -218,7 +223,7 @@ test("Case A: 2 Session 選択なら Review 可能", async () => {
     const result = await runIntegratedReview(twoSessions, "統合レビュー — テスト", {
       generateStructured: async (request) => {
         called = true;
-        assert.equal(request.schemaName, "integrated_review_v6");
+        assert.equal(request.schemaName, "integrated_review_v7");
         const contextIdx = request.user.indexOf("CURRENT CONTEXT");
         const sessionIdx = request.user.indexOf("#S\tS01");
         assert.ok(contextIdx >= 0 && sessionIdx > contextIdx);
@@ -441,6 +446,7 @@ test("存在しない EvidenceRef は semantic invalid のまま保存しカテ�
           input.payload.crossInsights[0]?.invalidReason,
           "invalid_evidence_ref",
         );
+        assert.doesNotMatch(JSON.stringify(input), /unknownAlias/);
         return { id: "review-1" };
       },
     });
@@ -1071,4 +1077,160 @@ test("Case M: Cross Insight を材料にした具体的 Next Question は残る"
     });
     assert.equal(result.ok, true);
   });
+});
+
+test("v7 schema exposes the exact-copy alias contract to structured output", () => {
+  assert.equal(INTEGRATED_REVIEW_SCHEMA_NAME, "integrated_review_v7");
+  const aliasDescription =
+    integratedReviewV7OutputSchema.shape.commonThemes.element.shape
+      .evidenceAliases.element.description;
+  assert.match(aliasDescription ?? "", /Case-sensitive ASCII base62/);
+  assert.match(aliasDescription ?? "", /no prefix, brackets, whitespace/);
+});
+
+test("v7 all-unknown aliases fail before save with aggregate-only diagnostics", async () => {
+  await withReviewEnv(async () => {
+    let saveCalls = 0;
+    const rawAlias = "secret-like-alias-value";
+    const result = await runIntegratedReviewProduction(
+      twoSessions,
+      "統合レビュー — テスト",
+      {
+        generateStructured: async () => ({
+          parsed: {
+            summary: "summary",
+            commonThemes: [
+              {
+                text: "grounded candidate",
+                relationType: "repetition",
+                evidenceGroups: [
+                  { sessionRef: "S01", evidenceAliases: [rawAlias] },
+                ],
+                evidenceAliases: [rawAlias],
+              },
+            ],
+            shifts: [],
+            tensions: [],
+            crossInsights: [],
+            hypotheses: [],
+            openQuestions: [],
+            nextQuestions: [],
+          },
+          model: "test-model",
+        }),
+        save: () => {
+          saveCalls += 1;
+          return { id: "must-not-save" };
+        },
+      },
+    );
+
+    assert.equal(result.ok, false);
+    if (result.ok) {
+      return;
+    }
+    assert.equal(result.reason, "evidence_validation_failed");
+    assert.equal(result.code, "all_review_evidence_invalid");
+    assert.equal(saveCalls, 0);
+    assert.equal(
+      result.groundingDiagnostic?.aliasDiagnostics.totalAliasReferences,
+      2,
+    );
+    assert.equal(
+      result.groundingDiagnostic?.aliasDiagnostics.exactMemberCount,
+      0,
+    );
+    assert.equal(
+      result.groundingDiagnostic?.aliasDiagnostics.nonBase62Count,
+      2,
+    );
+    assert.equal(result.groundingDiagnostic?.usableValidatedEvidenceCount, 0);
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(rawAlias));
+    assert.doesNotMatch(JSON.stringify(result), /自由に考えたいです/);
+    assert.doesNotMatch(JSON.stringify(result), /外部締切がある方が動きやすいです/);
+  });
+});
+
+test("v7 genuine no-insight output with zero attempts remains saveable", async () => {
+  await withReviewEnv(async () => {
+    let saveCalls = 0;
+    const result = await runIntegratedReview(
+      twoSessions,
+      "統合レビュー — テスト",
+      {
+        generateStructured: async () => ({
+          parsed: {
+            summary: "summary",
+            commonThemes: [],
+            shifts: [],
+            tensions: [],
+            crossInsights: [],
+            hypotheses: [],
+            openQuestions: [],
+            nextQuestions: [],
+          },
+          model: "test-model",
+        }),
+        save: () => {
+          saveCalls += 1;
+          return { id: "empty-review" };
+        },
+      },
+    );
+    assert.equal(result.ok, true);
+    assert.equal(saveCalls, 1);
+  });
+});
+
+test("grounding gate is generalized after provenance validation and permits partial-valid output", () => {
+  const provenanceRejected = evaluateReviewGroundingValidity({
+    aliasAttemptCount: 1,
+    items: [
+      {
+        evidence: [
+          {
+            validated: false,
+            evidenceRef: null,
+            messageId: "message-1",
+            sessionId: "session-1",
+          },
+        ],
+      },
+    ],
+  });
+  assert.deepEqual(provenanceRejected, {
+    usableValidatedEvidenceCount: 0,
+    valid: false,
+  });
+
+  const partialValid = evaluateReviewGroundingValidity({
+    aliasAttemptCount: 2,
+    items: [
+      {
+        evidence: [
+          {
+            validated: true,
+            evidenceRef: "server-owned-ref",
+            messageId: "message-1",
+            sessionId: "session-1",
+          },
+          {
+            validated: false,
+            evidenceRef: null,
+            messageId: null,
+            sessionId: null,
+          },
+        ],
+      },
+    ],
+  });
+  assert.deepEqual(partialValid, {
+    usableValidatedEvidenceCount: 1,
+    valid: true,
+  });
+
+  assert.deepEqual(
+    evaluateReviewGroundingValidity({ aliasAttemptCount: 0, items: [] }),
+    { usableValidatedEvidenceCount: 0, valid: true },
+  );
 });

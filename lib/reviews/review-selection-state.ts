@@ -1,6 +1,8 @@
 import { eq } from "drizzle-orm";
 import type { getDb } from "@/lib/db/client";
-import { reviewProcessingRuns, reviewSessions } from "@/lib/db/schema";
+import { reviewSessions } from "@/lib/db/schema";
+import { classifyReviewCompletionValidity } from "./review-completion-validity";
+import { listReviewProcessingRunsByReviewId } from "./review-run-store";
 import {
   normalizeReviewSelectionSessionIds,
   reviewSessionSetsEqual,
@@ -56,20 +58,29 @@ export function classifyExactReviewSelectionState(
       continue;
     }
 
-    const run = db
-      .select()
-      .from(reviewProcessingRuns)
-      .where(eq(reviewProcessingRuns.reviewId, reviewId))
-      .get();
-    if (!run) {
+    const runs = listReviewProcessingRunsByReviewId({ reviewId, db });
+    if (runs.length === 0) {
       exactLegacyUnknownReviewIds.push(reviewId);
       continue;
     }
-    if (run.phase === "projection_done") {
+
+    const usableCompleted = runs.find(
+      (run) =>
+        run.phase === "projection_done" &&
+        classifyReviewCompletionValidity({
+          reviewId,
+          processingVersion: run.processingVersion,
+          db,
+        }).usable,
+    );
+    if (usableCompleted) {
       exactCompletedReviewIds.push(reviewId);
       continue;
     }
-    exactPendingReviewIds.push(reviewId);
+
+    if (runs.some((run) => run.phase !== "projection_done")) {
+      exactPendingReviewIds.push(reviewId);
+    }
   }
 
   return {

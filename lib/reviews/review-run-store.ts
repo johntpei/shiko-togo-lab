@@ -7,6 +7,7 @@ import {
 } from "@/lib/db/schema";
 import {
   INTEGRATED_REVIEW_PROCESSING_VERSION,
+  SUPPORTED_INTEGRATED_REVIEW_PROCESSING_VERSIONS,
   type ReviewProcessingRunFailureStage,
   type ReviewProcessingRunPhase,
 } from "./review-run-types";
@@ -44,20 +45,52 @@ export function loadReviewProcessingRunByReviewId(input: {
   processingVersion?: string;
   db: AppDb;
 }): ReviewProcessingRunRecord | null {
-  const processingVersion =
-    input.processingVersion ?? INTEGRATED_REVIEW_PROCESSING_VERSION;
-  return (
-    input.db
+  if (input.processingVersion) {
+    return (
+      input.db
+        .select()
+        .from(reviewProcessingRuns)
+        .where(
+          and(
+            eq(reviewProcessingRuns.reviewId, input.reviewId),
+            eq(reviewProcessingRuns.processingVersion, input.processingVersion),
+          ),
+        )
+        .get() ?? null
+    );
+  }
+  return listReviewProcessingRunsByReviewId(input).at(0) ?? null;
+}
+
+function processingVersionRank(version: string) {
+  const rank = (
+    SUPPORTED_INTEGRATED_REVIEW_PROCESSING_VERSIONS as readonly string[]
+  ).indexOf(version);
+  return rank === -1 ? Number.MAX_SAFE_INTEGER : rank;
+}
+
+export function listReviewProcessingRunsByReviewId(input: {
+  reviewId: string;
+  db: AppDb;
+}): ReviewProcessingRunRecord[] {
+  return input.db
       .select()
       .from(reviewProcessingRuns)
-      .where(
-        and(
-          eq(reviewProcessingRuns.reviewId, input.reviewId),
-          eq(reviewProcessingRuns.processingVersion, processingVersion),
-        ),
-      )
-      .get() ?? null
-  );
+      .where(eq(reviewProcessingRuns.reviewId, input.reviewId))
+      .all()
+      .sort((left, right) => {
+        const byVersion =
+          processingVersionRank(left.processingVersion) -
+          processingVersionRank(right.processingVersion);
+        if (byVersion !== 0) {
+          return byVersion;
+        }
+        const byUpdated = right.updatedAt.localeCompare(left.updatedAt);
+        if (byUpdated !== 0) {
+          return byUpdated;
+        }
+        return left.runId.localeCompare(right.runId);
+      });
 }
 
 export function updateReviewProcessingRunPhase(input: {

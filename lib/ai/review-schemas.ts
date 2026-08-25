@@ -226,6 +226,83 @@ export type IntegratedReviewV6Output = z.infer<
   typeof integratedReviewV6OutputSchema
 >;
 
+export const INTEGRATED_REVIEW_SCHEMA_V6 = "integrated_review_v6" as const;
+export const INTEGRATED_REVIEW_SCHEMA_V7 = "integrated_review_v7" as const;
+export const INTEGRATED_REVIEW_SCHEMA_NAME = INTEGRATED_REVIEW_SCHEMA_V7;
+
+const reviewEvidenceAliasV7Schema = z
+  .string()
+  .describe(
+    "Case-sensitive ASCII base62 EvidenceAlias copied exactly from the supplied compact Evidence transport; no prefix, brackets, whitespace, or legacy EvidenceRef syntax.",
+  );
+
+const reviewAliasV7ItemSchema = z.object({
+  text: z.string(),
+  evidenceAliases: z.array(reviewEvidenceAliasV7Schema),
+});
+
+const reviewAliasV7ShiftItemSchema = z.object({
+  before: z.string(),
+  after: z.string(),
+  interpretation: z.string(),
+  beforeEvidenceAliases: z.array(reviewEvidenceAliasV7Schema),
+  afterEvidenceAliases: z.array(reviewEvidenceAliasV7Schema),
+});
+
+const reviewEvidenceAliasV7GroupSchema = z.object({
+  sessionRef: z.string(),
+  evidenceAliases: z.array(reviewEvidenceAliasV7Schema),
+});
+
+const groupedReviewAliasV7ItemSchema = z.object({
+  text: z.string(),
+  relationType: z.enum(REVIEW_RELATION_TYPES),
+  evidenceGroups: z.array(reviewEvidenceAliasV7GroupSchema),
+  evidenceAliases: z.array(reviewEvidenceAliasV7Schema),
+});
+
+const reviewAliasV7HypothesisItemSchema = z.object({
+  text: z.string(),
+  rationale: z.string(),
+  validationIdea: z.string(),
+  relationType: z.enum(REVIEW_RELATION_TYPES),
+  evidenceGroups: z.array(reviewEvidenceAliasV7GroupSchema),
+  evidenceAliases: z.array(reviewEvidenceAliasV7Schema),
+});
+
+const reviewAliasV7TensionSideSchema = z.object({
+  text: z.string(),
+  evidenceAliases: z.array(reviewEvidenceAliasV7Schema),
+});
+
+const reviewAliasV7TensionItemSchema = z.object({
+  text: z.string(),
+  relationType: z.enum(REVIEW_RELATION_TYPES),
+  sideA: reviewAliasV7TensionSideSchema,
+  sideB: reviewAliasV7TensionSideSchema,
+  evidenceGroups: z.array(reviewEvidenceAliasV7GroupSchema),
+  evidenceAliases: z.array(reviewEvidenceAliasV7Schema),
+});
+
+/**
+ * v7 keeps the v6 domain shape while making the model-facing exact-copy alias
+ * contract explicit. Dynamic width and membership remain request-owned checks.
+ */
+export const integratedReviewV7OutputSchema = z.object({
+  summary: z.string(),
+  commonThemes: z.array(groupedReviewAliasV7ItemSchema),
+  shifts: z.array(reviewAliasV7ShiftItemSchema),
+  tensions: z.array(reviewAliasV7TensionItemSchema),
+  crossInsights: z.array(groupedReviewAliasV7ItemSchema),
+  hypotheses: z.array(reviewAliasV7HypothesisItemSchema),
+  openQuestions: z.array(reviewAliasV7ItemSchema),
+  nextQuestions: z.array(reviewAliasV7ItemSchema),
+});
+
+export type IntegratedReviewV7Output = z.infer<
+  typeof integratedReviewV7OutputSchema
+>;
+
 export const storedReviewEvidenceSchema = z.object({
   messageRef: z.string(),
   quote: z.string(),

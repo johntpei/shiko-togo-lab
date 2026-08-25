@@ -158,6 +158,9 @@ function summarizeReviewFailure(
     failureReason: sanitizeDualPipelineReviewFailureToken(result.reason),
     failureCode: sanitizeDualPipelineReviewFailureToken(result.code),
     llmCalls: result.llmCalls,
+    ...(result.groundingDiagnostic
+      ? { groundingDiagnostic: result.groundingDiagnostic }
+      : {}),
   };
 }
 

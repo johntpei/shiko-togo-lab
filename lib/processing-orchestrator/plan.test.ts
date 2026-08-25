@@ -171,6 +171,12 @@ test("A. empty selection is a valid no_selection plan", () => {
   assert.equal(plan.workload.conceptExtractionCallsKnown, 0);
   assert.equal(plan.workload.reviewCallsKnown, 0);
   assert.equal(plan.codeFacts.triggerPolicy, "explicit_session_selection");
+  assert.deepEqual(plan.review.targetVersions, {
+    prompt: "integrated-review-v7",
+    schema: "integrated_review_v7",
+    processing: "integrated-review-processing-v2",
+    transport: "review-evidence-compact-v1",
+  });
 });
 
 test("B. missing Session is invalid and not execution-ready", () => {
