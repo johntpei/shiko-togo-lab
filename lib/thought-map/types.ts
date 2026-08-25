@@ -1,6 +1,7 @@
 import {
   OBSERVATION_CONCEPT_EVIDENCE_RELATION_KIND,
-  OBSERVATION_CONCEPT_EVIDENCE_RELATION_VERSION,
+  OBSERVATION_CONCEPT_EVIDENCE_RELATION_VERSION_V1,
+  OBSERVATION_CONCEPT_EVIDENCE_RELATION_VERSION_V2,
 } from "@/lib/observations/concept-evidence-supports";
 import type { ReviewObservationKind } from "@/lib/observations/types";
 
@@ -9,7 +10,8 @@ export const THOUGHT_MAP_VERSION = "thought-map-v0";
 export type ThoughtMapVersion = typeof THOUGHT_MAP_VERSION;
 
 export const THOUGHT_MAP_SUPPORTED_RELATION_VERSIONS = [
-  OBSERVATION_CONCEPT_EVIDENCE_RELATION_VERSION,
+  OBSERVATION_CONCEPT_EVIDENCE_RELATION_VERSION_V1,
+  OBSERVATION_CONCEPT_EVIDENCE_RELATION_VERSION_V2,
 ] as const;
 
 export type ThoughtMapSupportedRelationVersion =

@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import test from "node:test";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
+import { eq } from "drizzle-orm";
+import { toSessionRef } from "@/lib/ai/evidence-units";
 import { CONCEPT_EXTRACTION_VERSION } from "@/lib/concepts/types";
 import { applySqlMigrations } from "@/lib/db/client";
 import {
@@ -18,6 +20,8 @@ import * as schema from "@/lib/db/schema";
 import {
   OBSERVATION_CONCEPT_EVIDENCE_RELATION_KIND,
   OBSERVATION_CONCEPT_EVIDENCE_RELATION_VERSION,
+  OBSERVATION_CONCEPT_EVIDENCE_RELATION_VERSION_V1,
+  OBSERVATION_CONCEPT_EVIDENCE_RELATION_VERSION_V2,
 } from "@/lib/observations/concept-evidence-supports";
 import { reconcileObservationConceptEvidenceSupports } from "@/lib/observations/reconcile-concept-evidence-supports";
 import { REVIEW_OBSERVATION_VERSION } from "@/lib/observations/types";
@@ -219,21 +223,54 @@ function seedMessage(
   db: ReturnType<typeof openMemoryDb>,
   input: { id: string; sessionId: string; index?: number; content?: string },
 ) {
+  const content =
+    input.content ??
+    "First exact evidence unit has enough content.\nSecond exact evidence unit has enough content.\nThird exact evidence unit has enough content.";
   db.insert(schema.messages)
     .values({
       id: input.id,
       sessionId: input.sessionId,
       index: input.index ?? 0,
       role: "user",
-      content: input.content ?? USER_QUOTE,
+      content,
       charStart: 0,
-      charEnd: 1,
+      charEnd: content.length,
       sourceMessageId: null,
       sourceCreatedAt: null,
       contentType: "text",
       attachmentsJson: null,
     })
     .run();
+}
+
+function scopeReviewEvidenceRefs(
+  payload: string,
+  sessionIndexById: Map<string, number>,
+) {
+  const parsed: unknown = JSON.parse(payload);
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (!value || typeof value !== "object") {
+      return;
+    }
+    const record = value as Record<string, unknown>;
+    if (
+      typeof record.evidenceRef === "string" &&
+      /^M\d+:E\d+$/.test(record.evidenceRef) &&
+      typeof record.sessionId === "string"
+    ) {
+      const sessionIndex = sessionIndexById.get(record.sessionId);
+      if (sessionIndex != null) {
+        record.evidenceRef = `${toSessionRef(sessionIndex)}:${record.evidenceRef}`;
+      }
+    }
+    Object.values(record).forEach(visit);
+  };
+  visit(parsed);
+  return JSON.stringify(parsed);
 }
 
 function seedObservation(
@@ -249,6 +286,34 @@ function seedObservation(
     lastSeenAt?: string;
   },
 ) {
+  for (const sessionId of input.sessionIds) {
+    db.insert(schema.reviewSessions)
+      .values({ reviewId: "review-1", sessionId })
+      .onConflictDoNothing()
+      .run();
+  }
+  const orderedReviewSessions = db
+    .select({
+      reviewId: schema.reviewSessions.reviewId,
+      sessionId: schema.sessions.id,
+      occurredAt: schema.sessions.occurredAt,
+      createdAt: schema.sessions.createdAt,
+    })
+    .from(schema.reviewSessions)
+    .innerJoin(
+      schema.sessions,
+      eq(schema.reviewSessions.sessionId, schema.sessions.id),
+    )
+    .all()
+    .filter((row) => row.reviewId === "review-1")
+    .sort((left, right) =>
+      left.occurredAt.localeCompare(right.occurredAt) ||
+      left.createdAt.localeCompare(right.createdAt) ||
+      left.sessionId.localeCompare(right.sessionId),
+    );
+  const sessionIndexById = new Map(
+    orderedReviewSessions.map((row, index) => [row.sessionId, index]),
+  );
   db.insert(schema.observations)
     .values({
       id: input.id,
@@ -259,7 +324,7 @@ function seedObservation(
       title: input.title ?? input.id,
       body: input.body ?? input.id,
       supportType: null,
-      payload: input.payload,
+      payload: scopeReviewEvidenceRefs(input.payload, sessionIndexById),
       firstSeenAt: "2026-08-02",
       lastSeenAt: input.lastSeenAt ?? "2026-08-02",
       detectedAt: "2026-08-18T00:00:00.000Z",
@@ -590,16 +655,33 @@ test("T. supportCount < 1 is not an edge", () => {
   assert.equal(map.stats.isolatedConceptCount, 1);
 });
 
-test("U. unsupported relationVersion is not absorbed", () => {
+test("U. v1/v2 are supported; unrelated relationVersion is not absorbed", () => {
   const map = buildThoughtMap({
     concepts: [concept("c-1", "Alpha")],
     observations: [observation("o-1")],
     relations: [
       relation("o-1", "c-1", 1, "semantic-related-v1"),
-      relation("o-1", "c-1", 1, "observation-concept-exact-evidence-v2"),
+      relation(
+        "o-1",
+        "c-1",
+        1,
+        OBSERVATION_CONCEPT_EVIDENCE_RELATION_VERSION_V1,
+      ),
+      relation(
+        "o-1",
+        "c-1",
+        1,
+        OBSERVATION_CONCEPT_EVIDENCE_RELATION_VERSION_V2,
+      ),
     ],
   });
-  assert.equal(map.edges.length, 0);
+  assert.deepEqual(
+    map.edges.map((edge) => edge.relationVersion),
+    [
+      OBSERVATION_CONCEPT_EVIDENCE_RELATION_VERSION_V1,
+      OBSERVATION_CONCEPT_EVIDENCE_RELATION_VERSION_V2,
+    ],
+  );
 });
 
 test("V. missing endpoint does not invent nodes", () => {

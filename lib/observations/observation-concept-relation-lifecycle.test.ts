@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import test from "node:test";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
+import { eq } from "drizzle-orm";
+import { toSessionRef } from "@/lib/ai/evidence-units";
 import { CONCEPT_EXTRACTION_VERSION } from "@/lib/concepts/types";
 import { applySqlMigrations } from "@/lib/db/client";
 import {
@@ -95,23 +97,56 @@ function seedSession(
 
 function seedMessage(
   db: ReturnType<typeof openMemoryDb>,
-  input: { id: string; sessionId: string; index?: number },
+  input: { id: string; sessionId: string; index?: number; content?: string },
 ) {
+  const content =
+    input.content ??
+    "First exact evidence unit has enough content.\nSecond exact evidence unit has enough content.\nThird exact evidence unit has enough content.";
   db.insert(schema.messages)
     .values({
       id: input.id,
       sessionId: input.sessionId,
       index: input.index ?? 0,
       role: "user",
-      content: "x",
+      content,
       charStart: 0,
-      charEnd: 1,
+      charEnd: content.length,
       sourceMessageId: null,
       sourceCreatedAt: null,
       contentType: "text",
       attachmentsJson: null,
     })
     .run();
+}
+
+function scopeReviewEvidenceRefs(
+  payload: string,
+  sessionIndexById: Map<string, number>,
+) {
+  const parsed: unknown = JSON.parse(payload);
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (!value || typeof value !== "object") {
+      return;
+    }
+    const record = value as Record<string, unknown>;
+    if (
+      typeof record.evidenceRef === "string" &&
+      /^M\d+:E\d+$/.test(record.evidenceRef) &&
+      typeof record.sessionId === "string"
+    ) {
+      const sessionIndex = sessionIndexById.get(record.sessionId);
+      if (sessionIndex != null) {
+        record.evidenceRef = `${toSessionRef(sessionIndex)}:${record.evidenceRef}`;
+      }
+    }
+    Object.values(record).forEach(visit);
+  };
+  visit(parsed);
+  return JSON.stringify(parsed);
 }
 
 function seedObservation(
@@ -124,17 +159,46 @@ function seedObservation(
     sourceRef?: string;
   },
 ) {
+  const sourceReviewId = input.sourceReviewId ?? "review-1";
+  for (const sessionId of input.sessionIds) {
+    db.insert(schema.reviewSessions)
+      .values({ reviewId: sourceReviewId, sessionId })
+      .onConflictDoNothing()
+      .run();
+  }
+  const orderedReviewSessions = db
+    .select({
+      reviewId: schema.reviewSessions.reviewId,
+      sessionId: schema.sessions.id,
+      occurredAt: schema.sessions.occurredAt,
+      createdAt: schema.sessions.createdAt,
+    })
+    .from(schema.reviewSessions)
+    .innerJoin(
+      schema.sessions,
+      eq(schema.reviewSessions.sessionId, schema.sessions.id),
+    )
+    .all()
+    .filter((row) => row.reviewId === sourceReviewId)
+    .sort((left, right) =>
+      left.occurredAt.localeCompare(right.occurredAt) ||
+      left.createdAt.localeCompare(right.createdAt) ||
+      left.sessionId.localeCompare(right.sessionId),
+    );
+  const sessionIndexById = new Map(
+    orderedReviewSessions.map((row, index) => [row.sessionId, index]),
+  );
   db.insert(schema.observations)
     .values({
       id: input.id,
       kind: "connection",
       projectionVersion: REVIEW_OBSERVATION_VERSION,
-      sourceReviewId: input.sourceReviewId ?? "review-1",
+      sourceReviewId,
       sourceRef: input.sourceRef ?? input.id,
       title: input.id,
       body: input.id,
       supportType: null,
-      payload: input.payload,
+      payload: scopeReviewEvidenceRefs(input.payload, sessionIndexById),
       firstSeenAt: "2026-08-02",
       lastSeenAt: "2026-08-02",
       detectedAt: "2026-08-18T00:00:00.000Z",

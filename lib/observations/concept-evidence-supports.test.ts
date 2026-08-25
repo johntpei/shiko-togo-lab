@@ -4,7 +4,9 @@ import { resolve } from "node:path";
 import test from "node:test";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
+import { eq } from "drizzle-orm";
 import { CONCEPT_EXTRACTION_VERSION } from "@/lib/concepts/types";
+import { toSessionRef } from "@/lib/ai/evidence-units";
 import { applySqlMigrations } from "@/lib/db/client";
 import {
   insertConcept,
@@ -14,13 +16,27 @@ import { listObservationConceptRelations } from "@/lib/db/observation-concept-su
 import * as schema from "@/lib/db/schema";
 import {
   OBSERVATION_CONCEPT_EVIDENCE_RELATION_VERSION,
+  OBSERVATION_CONCEPT_EVIDENCE_RELATION_VERSION_V1,
   buildObservationConceptEvidenceSupports,
+  buildObservationConceptEvidenceSupportsV2,
   toObservationConceptRelationPairs,
 } from "./concept-evidence-supports";
-import { reconcileObservationConceptEvidenceSupports } from "./reconcile-concept-evidence-supports";
+import {
+  planObservationConceptEvidenceSupports,
+  reconcileObservationConceptEvidenceSupports,
+} from "./reconcile-concept-evidence-supports";
+import {
+  canonicalEvidenceIdentityEquals,
+  resolveConceptOccurrenceEvidenceIdentity,
+  resolveObservationEvidenceIdentity,
+  serializeCanonicalEvidenceLocalRef,
+  type CanonicalEvidenceResolutionContext,
+} from "./canonical-evidence-identity";
 import { REVIEW_OBSERVATION_VERSION } from "./types";
 
 const USER_QUOTE = "SECRET_USER_QUOTE_observation_concept_support";
+const MULTI_UNIT_CONTENT =
+  "First exact evidence unit has enough content.\nSecond exact evidence unit has enough content.\nThird exact evidence unit has enough content.";
 
 function evidence(input: {
   sessionId?: string | null;
@@ -95,23 +111,104 @@ function seedSession(
 
 function seedMessage(
   db: ReturnType<typeof openMemoryDb>,
-  input: { id: string; sessionId: string; index?: number },
+  input: { id: string; sessionId: string; index?: number; content?: string },
 ) {
+  const content =
+    input.content ?? MULTI_UNIT_CONTENT;
   db.insert(schema.messages)
     .values({
       id: input.id,
       sessionId: input.sessionId,
       index: input.index ?? 0,
       role: "user",
-      content: "x",
+      content,
       charStart: 0,
-      charEnd: 1,
+      charEnd: content.length,
       sourceMessageId: null,
       sourceCreatedAt: null,
       contentType: "text",
       attachmentsJson: null,
     })
     .run();
+}
+
+function syntheticCanonicalContext(): CanonicalEvidenceResolutionContext {
+  const session = (
+    id: string,
+    occurredAt: string,
+    messages: Array<{ id: string; index: number }>,
+  ) => ({
+    session: {
+      id,
+      title: id,
+      occurredAt,
+      source: "chatgpt",
+      category: "test",
+      createdAt: `${occurredAt}T00:00:00.000Z`,
+    },
+    messages: messages.map((message) => ({
+      ...message,
+      role: "user",
+      content: MULTI_UNIT_CONTENT,
+      attachmentsJson: null,
+    })),
+    analysis: null,
+  });
+  const reviewSources = [
+    session("s-1", "2026-08-01", [
+      { id: "m-1", index: 0 },
+      { id: "m-2", index: 1 },
+    ]),
+    session("s-2", "2026-08-02", [{ id: "m-3", index: 0 }]),
+  ];
+  return {
+    reviewSourcesByReviewId: new Map([["review-1", reviewSources]]),
+    conceptSessionsById: new Map(
+      reviewSources.map((source) => [
+        source.session.id,
+        {
+          sessionId: source.session.id,
+          occurredAt: source.session.occurredAt,
+          messages: source.messages.map((message) => ({
+            id: message.id,
+            role: message.role,
+            content: message.content,
+            sourceCreatedAt: null,
+          })),
+        },
+      ]),
+    ),
+  };
+}
+
+function scopeReviewEvidenceRefs(
+  payload: string,
+  sessionIndexById: Map<string, number>,
+) {
+  const parsed: unknown = JSON.parse(payload);
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (!value || typeof value !== "object") {
+      return;
+    }
+    const record = value as Record<string, unknown>;
+    if (
+      typeof record.evidenceRef === "string" &&
+      /^M\d+:E\d+$/.test(record.evidenceRef) &&
+      typeof record.sessionId === "string"
+    ) {
+      const sessionIndex = sessionIndexById.get(record.sessionId);
+      if (sessionIndex != null) {
+        record.evidenceRef = `${toSessionRef(sessionIndex)}:${record.evidenceRef}`;
+      }
+    }
+    Object.values(record).forEach(visit);
+  };
+  visit(parsed);
+  return JSON.stringify(parsed);
 }
 
 function seedObservation(
@@ -124,6 +221,34 @@ function seedObservation(
     sourceRef?: string;
   },
 ) {
+  for (const sessionId of input.sessionIds) {
+    db.insert(schema.reviewSessions)
+      .values({ reviewId: "review-1", sessionId })
+      .onConflictDoNothing()
+      .run();
+  }
+  const orderedReviewSessions = db
+    .select({
+      reviewId: schema.reviewSessions.reviewId,
+      sessionId: schema.sessions.id,
+      occurredAt: schema.sessions.occurredAt,
+      createdAt: schema.sessions.createdAt,
+    })
+    .from(schema.reviewSessions)
+    .innerJoin(
+      schema.sessions,
+      eq(schema.reviewSessions.sessionId, schema.sessions.id),
+    )
+    .all()
+    .filter((row) => row.reviewId === "review-1")
+    .sort((left, right) =>
+      left.occurredAt.localeCompare(right.occurredAt) ||
+      left.createdAt.localeCompare(right.createdAt) ||
+      left.sessionId.localeCompare(right.sessionId),
+    );
+  const sessionIndexById = new Map(
+    orderedReviewSessions.map((row, index) => [row.sessionId, index]),
+  );
   db.insert(schema.observations)
     .values({
       id: input.id,
@@ -134,7 +259,7 @@ function seedObservation(
       title: input.id,
       body: input.id,
       supportType: null,
-      payload: input.payload,
+      payload: scopeReviewEvidenceRefs(input.payload, sessionIndexById),
       firstSeenAt: "2026-08-02",
       lastSeenAt: "2026-08-02",
       detectedAt: "2026-08-18T00:00:00.000Z",
@@ -227,6 +352,214 @@ function seedExactPair(
     evidenceRef,
   });
 }
+
+test("v2 strict resolvers canonicalize exact cross-format producer refs", () => {
+  const context = syntheticCanonicalContext();
+  const observation = resolveObservationEvidenceIdentity({
+    sourceReviewId: "review-1",
+    sessionId: "s-1",
+    messageId: "m-1",
+    evidenceRef: "S01:M001:E01",
+    reviewSources: context.reviewSourcesByReviewId.get("review-1"),
+  });
+  const occurrence = resolveConceptOccurrenceEvidenceIdentity({
+    sessionId: "s-1",
+    messageId: "m-1",
+    evidenceRef: "M001:E01",
+    session: context.conceptSessionsById.get("s-1"),
+  });
+  assert.equal(observation.ok, true);
+  assert.equal(occurrence.ok, true);
+  if (observation.ok && occurrence.ok) {
+    assert.equal(
+      canonicalEvidenceIdentityEquals(
+        observation.identity,
+        occurrence.identity,
+      ),
+      true,
+    );
+    assert.deepEqual(observation.identity, {
+      sessionId: "s-1",
+      messageId: "m-1",
+      evidenceOrdinal: 1,
+    });
+  }
+});
+
+test("v2 strict resolvers keep Evidence, Message, and Session identities distinct", () => {
+  const context = syntheticCanonicalContext();
+  const resolveConcept = (
+    sessionId: string,
+    messageId: string,
+    evidenceRef: string,
+  ) =>
+    resolveConceptOccurrenceEvidenceIdentity({
+      sessionId,
+      messageId,
+      evidenceRef,
+      session: context.conceptSessionsById.get(sessionId),
+    });
+  const e1 = resolveConcept("s-1", "m-1", "M001:E01");
+  const e2 = resolveConcept("s-1", "m-1", "M001:E02");
+  const otherMessage = resolveConcept("s-1", "m-2", "M002:E01");
+  const otherSession = resolveConcept("s-2", "m-3", "M001:E01");
+  assert.ok(e1.ok && e2.ok && otherMessage.ok && otherSession.ok);
+  if (e1.ok && e2.ok && otherMessage.ok && otherSession.ok) {
+    assert.equal(canonicalEvidenceIdentityEquals(e1.identity, e2.identity), false);
+    assert.equal(
+      canonicalEvidenceIdentityEquals(e1.identity, otherMessage.identity),
+      false,
+    );
+    assert.equal(
+      canonicalEvidenceIdentityEquals(e1.identity, otherSession.identity),
+      false,
+    );
+  }
+});
+
+test("v2 strict resolvers reject mismatched and out-of-range coordinates", () => {
+  const context = syntheticCanonicalContext();
+  const reviewSources = context.reviewSourcesByReviewId.get("review-1");
+  const badSession = resolveObservationEvidenceIdentity({
+    sourceReviewId: "review-1",
+    sessionId: "s-1",
+    messageId: "m-1",
+    evidenceRef: "S02:M001:E01",
+    reviewSources,
+  });
+  const badReviewMessage = resolveObservationEvidenceIdentity({
+    sourceReviewId: "review-1",
+    sessionId: "s-1",
+    messageId: "m-1",
+    evidenceRef: "S01:M002:E01",
+    reviewSources,
+  });
+  const badConceptMessage = resolveConceptOccurrenceEvidenceIdentity({
+    sessionId: "s-1",
+    messageId: "m-1",
+    evidenceRef: "M002:E01",
+    session: context.conceptSessionsById.get("s-1"),
+  });
+  const outOfRange = resolveConceptOccurrenceEvidenceIdentity({
+    sessionId: "s-1",
+    messageId: "m-1",
+    evidenceRef: "M001:E99",
+    session: context.conceptSessionsById.get("s-1"),
+  });
+  assert.deepEqual(badSession, { ok: false, reason: "session_mismatch" });
+  assert.deepEqual(badReviewMessage, {
+    ok: false,
+    reason: "message_mismatch",
+  });
+  assert.deepEqual(badConceptMessage, {
+    ok: false,
+    reason: "message_mismatch",
+  });
+  assert.deepEqual(outOfRange, {
+    ok: false,
+    reason: "evidence_ordinal_out_of_range",
+  });
+});
+
+test("v2 strict resolvers reject whitespace, case mutation, garbage, and missing refs", () => {
+  const context = syntheticCanonicalContext();
+  const session = context.conceptSessionsById.get("s-1");
+  const resolve = (evidenceRef: string | undefined) =>
+    resolveConceptOccurrenceEvidenceIdentity({
+      sessionId: "s-1",
+      messageId: "m-1",
+      evidenceRef,
+      session,
+    });
+  assert.deepEqual(resolve(" M001:E01 "), {
+    ok: false,
+    reason: "noncanonical_ref",
+  });
+  assert.deepEqual(resolve("m001:e01"), {
+    ok: false,
+    reason: "noncanonical_ref",
+  });
+  assert.deepEqual(resolve("[M001:E01]"), {
+    ok: false,
+    reason: "malformed_ref",
+  });
+  assert.deepEqual(resolve(undefined), {
+    ok: false,
+    reason: "missing_evidence_ref",
+  });
+  assert.deepEqual(resolve("S01:M001:E01"), {
+    ok: false,
+    reason: "unsupported_legacy_provenance",
+  });
+});
+
+test("v2 Evidence-local serialization is deterministic and contains no S/M", () => {
+  assert.equal(serializeCanonicalEvidenceLocalRef(1), "E01");
+  assert.equal(serializeCanonicalEvidenceLocalRef(99), "E99");
+  assert.equal(serializeCanonicalEvidenceLocalRef(100), "E100");
+  assert.throws(() => serializeCanonicalEvidenceLocalRef(0));
+});
+
+test("central regression: v1 misses producer namespaces; v2 matches exactly", () => {
+  const observations = [
+    {
+      observationId: "obs-1",
+      sourceReviewId: "review-1",
+      kind: "connection",
+      payload: connectionPayload([
+        evidence({
+          sessionId: "s-1",
+          messageId: "m-1",
+          evidenceRef: "S01:M001:E01",
+        }),
+      ]),
+    },
+  ];
+  const conceptOccurrences = [
+    {
+      conceptId: "c-1",
+      sessionId: "s-1",
+      messageId: "m-1",
+      evidenceRef: "M001:E01",
+    },
+  ];
+  assert.equal(
+    buildObservationConceptEvidenceSupports({
+      observations,
+      conceptOccurrences,
+    }).length,
+    0,
+  );
+  const v2 = buildObservationConceptEvidenceSupportsV2({
+    observations,
+    conceptOccurrences,
+    context: syntheticCanonicalContext(),
+  });
+  assert.equal(v2.supports.length, 1);
+  assert.equal(v2.supports[0]?.relationVersion, OBSERVATION_CONCEPT_EVIDENCE_RELATION_VERSION);
+  assert.equal(v2.supports[0]?.evidenceRef, "E01");
+  assert.equal(v2.canonicalIdentityCollisions, 0);
+});
+
+test("a legacy v1 row does not suppress the missing v2 identity", () => {
+  const db = openMemoryDb();
+  seedExactPair(db);
+  db.insert(schema.observationConceptEvidenceSupports)
+    .values({
+      observationId: "obs-1",
+      conceptId: "c-1",
+      sessionId: "s-1",
+      messageId: "m-1",
+      evidenceRef: "S01:M001:E01",
+      relationVersion: OBSERVATION_CONCEPT_EVIDENCE_RELATION_VERSION_V1,
+      createdAt: "2026-08-23T00:00:00.000Z",
+    })
+    .run();
+  const plan = planObservationConceptEvidenceSupports(["s-1"], db);
+  assert.equal(plan.desired.length, 1);
+  assert.equal(plan.existingCount, 0);
+  assert.equal(plan.missing.length, 1);
+});
 
 test("A. empty → support 0", () => {
   const supports = buildObservationConceptEvidenceSupports({

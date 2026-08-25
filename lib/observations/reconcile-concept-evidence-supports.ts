@@ -1,11 +1,15 @@
 import {
   buildObservationConceptEvidenceSupports,
+  buildObservationConceptEvidenceSupportsV2,
   OBSERVATION_CONCEPT_EVIDENCE_RELATION_VERSION,
+  OBSERVATION_CONCEPT_EVIDENCE_RELATION_VERSION_V1,
   toObservationConceptRelationPairs,
+  type BuildObservationConceptEvidenceSupportsV2Result,
   type ObservationConceptEvidenceSupport,
 } from "./concept-evidence-supports";
 import {
   insertObservationConceptEvidenceSupports,
+  loadCanonicalEvidenceResolutionContext,
   listConceptOccurrencesForSessions,
   listObservationConceptEvidenceSupportsForSessions,
   listObservationsForSessions,
@@ -47,6 +51,7 @@ export type ObservationConceptEvidenceSupportPlan = {
   existingCount: number;
   missing: ObservationConceptEvidenceSupport[];
   uniqueObservationConceptPairs: number;
+  canonicalPreview: BuildObservationConceptEvidenceSupportsV2Result | null;
 };
 
 function normalizeSessionIds(sessionIds: string[]) {
@@ -71,6 +76,7 @@ export function planObservationConceptEvidenceSupports(
       existingCount: 0,
       missing: [],
       uniqueObservationConceptPairs: 0,
+      canonicalPreview: null,
     };
   }
   const observations = listObservationsForSessions(sessionsChecked, db);
@@ -78,10 +84,21 @@ export function planObservationConceptEvidenceSupports(
     sessionsChecked,
     db,
   );
-  const desired = buildObservationConceptEvidenceSupports({
+  const context = loadCanonicalEvidenceResolutionContext(
+    {
+      reviewIds: observations.map((row) => row.sourceReviewId),
+      sessionIds: conceptOccurrences.map((row) => row.sessionId),
+    },
+    db,
+  );
+  const canonicalPreview = buildObservationConceptEvidenceSupportsV2({
     observations,
     conceptOccurrences,
-  }).filter((row) => sessionsChecked.includes(row.sessionId));
+    context,
+  });
+  const desired = canonicalPreview.supports.filter((row) =>
+    sessionsChecked.includes(row.sessionId),
+  );
   const existing = listObservationConceptEvidenceSupportsForSessions(
     sessionsChecked,
     db,
@@ -97,6 +114,52 @@ export function planObservationConceptEvidenceSupports(
     missing,
     uniqueObservationConceptPairs:
       toObservationConceptRelationPairs(desired).length,
+    canonicalPreview,
+  };
+}
+
+/** Legacy immutable v1 preview. Never used as the current write target. */
+export function planObservationConceptEvidenceSupportsV1(
+  sessionIds: string[],
+  db: ObservationConceptSupportExecutor,
+): ObservationConceptEvidenceSupportPlan {
+  const sessionsChecked = normalizeSessionIds(sessionIds);
+  if (sessionsChecked.length === 0) {
+    return {
+      sessionsChecked,
+      desired: [],
+      existingCount: 0,
+      missing: [],
+      uniqueObservationConceptPairs: 0,
+      canonicalPreview: null,
+    };
+  }
+  const observations = listObservationsForSessions(sessionsChecked, db);
+  const conceptOccurrences = listConceptOccurrencesForSessions(
+    sessionsChecked,
+    db,
+  );
+  const desired = buildObservationConceptEvidenceSupports({
+    observations,
+    conceptOccurrences,
+  }).filter((row) => sessionsChecked.includes(row.sessionId));
+  const existing = listObservationConceptEvidenceSupportsForSessions(
+    sessionsChecked,
+    db,
+    OBSERVATION_CONCEPT_EVIDENCE_RELATION_VERSION_V1,
+  );
+  const existingKeys = observationConceptSupportIdentitySet(existing);
+  const missing = desired.filter(
+    (row) => !existingKeys.has(supportIdentity(row)),
+  );
+  return {
+    sessionsChecked,
+    desired,
+    existingCount: existing.length,
+    missing,
+    uniqueObservationConceptPairs:
+      toObservationConceptRelationPairs(desired).length,
+    canonicalPreview: null,
   };
 }
 
