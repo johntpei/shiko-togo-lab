@@ -5,6 +5,7 @@ import {
   CalendarClock,
   House,
   MessagesSquare,
+  Network,
   Package,
   ScanSearch,
   ScrollText,
@@ -17,6 +18,7 @@ import { APP_NAME } from "@/lib/app/identity";
 const nav = [
   { href: "/", label: "ホーム", icon: House },
   { href: "/timeline", label: "Timeline", icon: CalendarClock },
+  { href: "/thought-map", label: "思考マップ", icon: Network },
   { href: "/sessions", label: "Session", icon: MessagesSquare },
   { href: "/imports/chatgpt", label: "ChatGPT読込", icon: Upload },
   { href: "/reviews", label: "レビュー", icon: ScanSearch },
