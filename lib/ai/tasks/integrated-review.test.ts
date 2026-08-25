@@ -9,10 +9,16 @@ import {
 } from "../limits";
 import { INTEGRATED_REVIEW_PROMPT_VERSION } from "../prompts/integrated-review";
 import { ANALYZE_SESSION_PROMPT_V4 } from "../prompts/analyze-session";
+import {
+  createReviewEvidenceAliasContractV2,
+  exactEvidenceRefForAlias,
+  INVALID_REVIEW_EVIDENCE_ALIAS_REF,
+} from "../review-evidence-transport";
 import type { ReviewSessionSource } from "../review-input";
 import {
   INTEGRATED_REVIEW_SCHEMA_NAME,
   createIntegratedReviewV8OutputSchema,
+  createIntegratedReviewV9OutputSchema,
   integratedReviewV7OutputSchema,
 } from "../review-schemas";
 import {
@@ -225,7 +231,7 @@ test("Case A: 2 Session 選択なら Review 可能", async () => {
     const result = await runIntegratedReview(twoSessions, "統合レビュー — テスト", {
       generateStructured: async (request) => {
         called = true;
-        assert.equal(request.schemaName, "integrated_review_v8");
+        assert.equal(request.schemaName, "integrated_review_v9");
         const contextIdx = request.user.indexOf("CURRENT CONTEXT");
         const sessionIdx = request.user.indexOf("#S\tS01");
         assert.ok(contextIdx >= 0 && sessionIdx > contextIdx);
@@ -238,7 +244,7 @@ test("Case A: 2 Session 選択なら Review 可能", async () => {
         assert.equal(input.promptVersion, INTEGRATED_REVIEW_PROMPT_VERSION);
         assert.equal(
           input.payload.settings.transportVersion,
-          "review-evidence-compact-v1",
+          "review-evidence-compact-v2",
         );
         assert.equal(input.model, "returned-model");
         assert.equal(input.payload.commonThemes[0]?.semanticValid, true);
@@ -1081,8 +1087,7 @@ test("Case M: Cross Insight を材料にした具体的 Next Question は残る"
   });
 });
 
-test("v8 schema is request-scoped and sends exact dynamic base62 width to structured output", () => {
-  assert.equal(INTEGRATED_REVIEW_SCHEMA_NAME, "integrated_review_v8");
+test("historical v8 schema remains request-scoped with its original base62 contract", () => {
   const historicalV7Description =
     integratedReviewV7OutputSchema.shape.commonThemes.element.shape
       .evidenceAliases.element.description;
@@ -1116,7 +1121,7 @@ test("v8 schema is request-scoped and sends exact dynamic base62 width to struct
   assert.equal(width3.safeParse(aliasFixture("0A")).success, false);
   assert.equal(width2.safeParse(aliasFixture("0A")).success, true);
 
-  const format = zodTextFormat(width2, INTEGRATED_REVIEW_SCHEMA_NAME);
+  const format = zodTextFormat(width2, "integrated_review_v8");
   const jsonSchema = JSON.stringify(format.schema);
   assert.ok(jsonSchema.includes('"minLength":2'));
   assert.ok(jsonSchema.includes('"maxLength":2'));
@@ -1128,7 +1133,100 @@ test("v8 schema is request-scoped and sends exact dynamic base62 width to struct
   assert.throws(() => createIntegratedReviewV8OutputSchema(Number.NaN));
 });
 
-test("v8 correct-width non-member aliases reach exact membership gate without leaking raw values", async () => {
+test("v9 schema derives reserved first-character grammar from an isolated compact-v2 contract", () => {
+  assert.equal(INTEGRATED_REVIEW_SCHEMA_NAME, "integrated_review_v9");
+  const replaceAliases = (value: unknown, alias: string): unknown => {
+    if (Array.isArray(value)) {
+      return value.map((item) => replaceAliases(item, alias));
+    }
+    if (!value || typeof value !== "object") {
+      return value;
+    }
+    return Object.fromEntries(
+      Object.entries(value).map(([key, field]) => [
+        key,
+        key.endsWith("Aliases") && Array.isArray(field)
+          ? field.map(() => alias)
+          : replaceAliases(field, alias),
+      ]),
+    );
+  };
+  const fixture = (alias: string) =>
+    replaceAliases(toV6TransportFixture(validOutput), alias);
+  const width1Contract = createReviewEvidenceAliasContractV2(60);
+  const width2Contract = createReviewEvidenceAliasContractV2(721);
+  const width3Contract = createReviewEvidenceAliasContractV2(3_721);
+  const width1 = createIntegratedReviewV9OutputSchema(width1Contract);
+  const width2 = createIntegratedReviewV9OutputSchema(width2Contract);
+  const width3 = createIntegratedReviewV9OutputSchema(width3Contract);
+  const validWidth2 = width2Contract.exampleAliases[0]!;
+  const validWidth3 = width3Contract.exampleAliases[0]!;
+
+  assert.equal(width1Contract.width, 1);
+  assert.equal(width2Contract.width, 2);
+  assert.equal(width3Contract.width, 3);
+  assert.equal(
+    width1.safeParse(fixture(width1Contract.exampleAliases[0]!)).success,
+    true,
+  );
+  assert.equal(width1.safeParse(fixture("M")).success, false);
+  assert.equal(width1.safeParse(fixture("S")).success, false);
+  assert.equal(width2.safeParse(fixture(validWidth2)).success, true);
+  assert.equal(width2.safeParse(fixture("M0")).success, false);
+  assert.equal(width2.safeParse(fixture("S0")).success, false);
+  assert.equal(width2.safeParse(fixture("m0")).success, true);
+  assert.equal(width2.safeParse(fixture("s0")).success, true);
+  assert.equal(width2.safeParse(fixture(validWidth3)).success, false);
+  assert.equal(width3.safeParse(fixture(validWidth3)).success, true);
+  assert.equal(width3.safeParse(fixture("M00")).success, false);
+  assert.equal(width3.safeParse(fixture("S00")).success, false);
+  assert.equal(width2.safeParse(fixture(validWidth2)).success, true);
+
+  const messageRefConfusion = {
+    summary: "summary",
+    commonThemes: [
+      {
+        text: "candidate",
+        relationType: "repetition",
+        evidenceGroups: [
+          {
+            sessionRef: "S01",
+            evidenceAliases: Array.from(
+              { length: 73 },
+              (_, index) => `M${index % 10}`,
+            ),
+          },
+        ],
+        evidenceAliases: [],
+      },
+    ],
+    shifts: [],
+    tensions: [],
+    crossInsights: [],
+    hypotheses: [],
+    openQuestions: [],
+    nextQuestions: [],
+  };
+  assert.equal(width2.safeParse(messageRefConfusion).success, false);
+
+  const format = zodTextFormat(width2, INTEGRATED_REVIEW_SCHEMA_NAME);
+  const jsonSchema = JSON.stringify(format.schema);
+  const encodedPattern = JSON.stringify(width2Contract.pattern);
+  assert.ok(jsonSchema.includes('"minLength":2'));
+  assert.ok(jsonSchema.includes('"maxLength":2'));
+  assert.ok(jsonSchema.includes(`"pattern":${encodedPattern}`));
+  assert.equal(jsonSchema.split(`"pattern":${encodedPattern}`).length - 1, 14);
+
+  const correctWidthNonmember = "zz";
+  assert.equal(width2Contract.isLexicallyValid(correctWidthNonmember), true);
+  assert.equal(width2.safeParse(fixture(correctWidthNonmember)).success, true);
+  assert.equal(
+    exactEvidenceRefForAlias(correctWidthNonmember, new Map()),
+    INVALID_REVIEW_EVIDENCE_ALIAS_REF,
+  );
+});
+
+test("v9 correct-width non-member aliases reach exact membership gate without leaking raw values", async () => {
   await withReviewEnv(async () => {
     let saveCalls = 0;
     const rawAlias = "Z";
@@ -1195,7 +1293,7 @@ test("v8 correct-width non-member aliases reach exact membership gate without le
   });
 });
 
-test("v8 wrong-width provider payload fails schema without leaking raw aliases or retrying", async () => {
+test("v9 wrong-width provider payload fails schema without leaking raw aliases or retrying", async () => {
   await withReviewEnv(async () => {
     let saveCalls = 0;
     const rawAlias = "SECRET_USER";
@@ -1243,7 +1341,7 @@ test("v8 wrong-width provider payload fails schema without leaking raw aliases o
   });
 });
 
-test("v8 genuine no-insight output with zero attempts remains saveable", async () => {
+test("v9 genuine no-insight output with zero attempts remains saveable", async () => {
   await withReviewEnv(async () => {
     let saveCalls = 0;
     const result = await runIntegratedReview(

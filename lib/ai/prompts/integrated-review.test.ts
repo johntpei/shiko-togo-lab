@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { currentProjectContext } from "@/lib/app/current-context";
+import { createReviewEvidenceAliasContractV2 } from "@/lib/ai/review-evidence-transport";
 import {
   INTEGRATED_REVIEW_PROMPT_V1,
   INTEGRATED_REVIEW_PROMPT_V2,
@@ -10,6 +11,7 @@ import {
   INTEGRATED_REVIEW_PROMPT_V6,
   INTEGRATED_REVIEW_PROMPT_V7,
   INTEGRATED_REVIEW_PROMPT_V8,
+  INTEGRATED_REVIEW_PROMPT_V9,
   INTEGRATED_REVIEW_PROMPT_VERSION,
   INTEGRATED_REVIEW_SYSTEM_PROMPT,
   INTEGRATED_REVIEW_SYSTEM_PROMPT_V1,
@@ -18,19 +20,22 @@ import {
   INTEGRATED_REVIEW_SYSTEM_PROMPT_V6,
   INTEGRATED_REVIEW_SYSTEM_PROMPT_V7,
   INTEGRATED_REVIEW_SYSTEM_PROMPT_V8,
+  INTEGRATED_REVIEW_SYSTEM_PROMPT_V9,
   buildIntegratedReviewUserPromptV5,
   buildIntegratedReviewUserPromptV6,
   buildIntegratedReviewUserPromptV7,
   buildIntegratedReviewUserPromptV8,
+  buildIntegratedReviewUserPromptV9,
 } from "./integrated-review";
 
-test("現行 promptVersion は integrated-review-v8", () => {
-  assert.equal(INTEGRATED_REVIEW_PROMPT_VERSION, "integrated-review-v8");
+test("現行 promptVersion は integrated-review-v9", () => {
+  assert.equal(INTEGRATED_REVIEW_PROMPT_VERSION, "integrated-review-v9");
+  assert.equal(INTEGRATED_REVIEW_PROMPT_V9, "integrated-review-v9");
   assert.equal(INTEGRATED_REVIEW_PROMPT_V8, "integrated-review-v8");
   assert.equal(INTEGRATED_REVIEW_PROMPT_V7, "integrated-review-v7");
   assert.equal(INTEGRATED_REVIEW_PROMPT_V6, "integrated-review-v6");
   assert.equal(INTEGRATED_REVIEW_PROMPT_V5, "integrated-review-v5");
-  assert.equal(INTEGRATED_REVIEW_SYSTEM_PROMPT, INTEGRATED_REVIEW_SYSTEM_PROMPT_V8);
+  assert.equal(INTEGRATED_REVIEW_SYSTEM_PROMPT, INTEGRATED_REVIEW_SYSTEM_PROMPT_V9);
 });
 
 test("v1〜v5 プロンプトは残している", () => {
@@ -112,6 +117,41 @@ test("v8 は v7 semantic policyを維持しSession/Message metadataとの区別�
   assert.match(user, /bare EvidenceAliasだけ/);
   assert.doesNotMatch(user, /EvidenceRef/);
   assert.doesNotMatch(user, /S01:M003:E02/);
+});
+
+test("v9 は v8 semantic policyを維持しreserved namespace contractだけを追加する", () => {
+  for (const semantic of [
+    "Claimを先に考え、後からEvidenceを探してはいけない",
+    "PHASE A",
+    "PHASE B",
+    "PHASE C",
+    "2 Session 未満の Theme / Tension / Insight / Hypothesis は出さない",
+  ]) {
+    assert.match(INTEGRATED_REVIEW_SYSTEM_PROMPT_V8, new RegExp(semantic));
+    assert.match(INTEGRATED_REVIEW_SYSTEM_PROMPT_V9, new RegExp(semantic));
+  }
+  assert.match(INTEGRATED_REVIEW_SYSTEM_PROMPT_V9, /大文字のMまたはS/);
+  assert.match(INTEGRATED_REVIEW_SYSTEM_PROMPT_V9, /M001.*MessageRef/);
+  assert.match(INTEGRATED_REVIEW_SYSTEM_PROMPT_V9, /S01.*SessionRef/);
+});
+
+test("v9 prompt examples and reserved namespace instructions follow each request contract", () => {
+  for (const count of [1, 61, 3_721]) {
+    const contract = createReviewEvidenceAliasContractV2(count);
+    const evidenceAlias = contract.exampleAliases[0]!;
+    const user = buildIntegratedReviewUserPromptV9(
+      `#S\tS01\n#M\tM001\tU\n${evidenceAlias}\tEvidence本文`,
+      contract,
+    );
+
+    assert.match(user, new RegExp(`正確に ${contract.width} 文字`));
+    assert.match(user, new RegExp(`正しいEvidenceAliasの例: ${evidenceAlias}`));
+    assert.match(user, /大文字のMとSは予約/);
+    assert.match(user, /M001はMessageRef、S01はSessionRef/);
+    assert.match(user, /evidenceGroups\.sessionRefだけ/);
+    assert.equal(contract.isLexicallyValid(evidenceAlias), true);
+    assert.equal(evidenceAlias.length, contract.width);
+  }
 });
 
 test("v5 は Evidence-first でありプロジェクト名をハードコードしない", () => {

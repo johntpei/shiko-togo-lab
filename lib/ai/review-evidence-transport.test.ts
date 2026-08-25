@@ -4,14 +4,22 @@ import {
   INVALID_REVIEW_EVIDENCE_ALIAS_REF,
   REVIEW_EVIDENCE_ALIAS_ALPHABET,
   REVIEW_EVIDENCE_ALIAS_LENGTH_BUCKETS,
+  REVIEW_EVIDENCE_ALIAS_RESERVED_FIRST_CHARACTERS,
+  REVIEW_EVIDENCE_ALIAS_V2_FIRST_ALPHABET,
   REVIEW_EVIDENCE_TRANSPORT_VERSION,
+  REVIEW_EVIDENCE_TRANSPORT_VERSION_V1,
+  REVIEW_EVIDENCE_TRANSPORT_VERSION_V2,
   buildCanonicalReviewEvidenceInput,
+  buildCanonicalReviewEvidenceInputV1,
+  createReviewEvidenceAliasContractV1,
+  createReviewEvidenceAliasContractV2,
   decodeCompactReviewEvidenceText,
   diagnoseReviewEvidenceAliases,
   encodeCompactReviewEvidenceText,
   exactEvidenceRefForAlias,
   isReviewEvidenceAliasLexicallySafe,
   reviewEvidenceAliasWidthForCount,
+  reviewEvidenceAliasWidthForCountV2,
 } from "./review-evidence-transport";
 import { resolveEvidenceRef } from "./evidence-refs";
 import type { ReviewAnalyzeMessage, ReviewSessionSource } from "./review-input";
@@ -159,6 +167,97 @@ test("alias width matches base62 capacity boundaries without request-global stat
   assert.equal(reviewEvidenceAliasWidthForCount(base ** 2 + 1), 3);
 });
 
+test("compact-v2 reserves exactly uppercase M/S in the first-character namespace", () => {
+  assert.equal(REVIEW_EVIDENCE_TRANSPORT_VERSION, REVIEW_EVIDENCE_TRANSPORT_VERSION_V2);
+  assert.equal(REVIEW_EVIDENCE_ALIAS_ALPHABET.length, 62);
+  assert.deepEqual(REVIEW_EVIDENCE_ALIAS_RESERVED_FIRST_CHARACTERS, ["M", "S"]);
+  assert.equal(REVIEW_EVIDENCE_ALIAS_V2_FIRST_ALPHABET.length, 60);
+  assert.equal(REVIEW_EVIDENCE_ALIAS_V2_FIRST_ALPHABET.includes("M"), false);
+  assert.equal(REVIEW_EVIDENCE_ALIAS_V2_FIRST_ALPHABET.includes("S"), false);
+  assert.equal(REVIEW_EVIDENCE_ALIAS_V2_FIRST_ALPHABET.includes("m"), true);
+  assert.equal(REVIEW_EVIDENCE_ALIAS_V2_FIRST_ALPHABET.includes("s"), true);
+  assert.equal(
+    REVIEW_EVIDENCE_ALIAS_V2_FIRST_ALPHABET,
+    [...REVIEW_EVIDENCE_ALIAS_ALPHABET]
+      .filter((character) => character !== "M" && character !== "S")
+      .join(""),
+  );
+});
+
+test("compact-v2 width boundaries use 60 × 62^(width-1) capacity", () => {
+  assert.equal(reviewEvidenceAliasWidthForCountV2(0), 1);
+  assert.equal(reviewEvidenceAliasWidthForCountV2(1), 1);
+  assert.equal(reviewEvidenceAliasWidthForCountV2(60), 1);
+  assert.equal(reviewEvidenceAliasWidthForCountV2(61), 2);
+  assert.equal(reviewEvidenceAliasWidthForCountV2(3_720), 2);
+  assert.equal(reviewEvidenceAliasWidthForCountV2(3_721), 3);
+
+  assert.equal(createReviewEvidenceAliasContractV2(60).capacity, 60);
+  assert.equal(createReviewEvidenceAliasContractV2(3_720).capacity, 3_720);
+  assert.equal(createReviewEvidenceAliasContractV2(230_640).capacity, 230_640);
+});
+
+test("compact-v1 historical namespace and boundaries remain available", () => {
+  const widthOne = createReviewEvidenceAliasContractV1(62);
+  const widthTwo = createReviewEvidenceAliasContractV1(63);
+  assert.equal(widthOne.serializationVersion, REVIEW_EVIDENCE_TRANSPORT_VERSION_V1);
+  assert.equal(widthOne.width, 1);
+  assert.equal(widthOne.encodeAlias(22), "M");
+  assert.equal(widthOne.encodeAlias(28), "S");
+  assert.equal(widthTwo.width, 2);
+  assert.equal(widthTwo.encodeAlias(62), "10");
+  assert.equal(reviewEvidenceAliasWidthForCount(3_844), 2);
+  assert.equal(reviewEvidenceAliasWidthForCount(3_845), 3);
+});
+
+test("all 3,720 compact-v2 width-two aliases are unique and never M/S-leading", () => {
+  const first = createReviewEvidenceAliasContractV2(3_720);
+  const second = createReviewEvidenceAliasContractV2(3_720);
+  const aliases = Array.from({ length: 3_720 }, (_, index) =>
+    first.encodeAlias(index),
+  );
+
+  assert.equal(first.width, 2);
+  assert.equal(first.pattern, second.pattern);
+  assert.equal(new Set(aliases).size, 3_720);
+  assert.equal(aliases.filter((alias) => alias.startsWith("M")).length, 0);
+  assert.equal(aliases.filter((alias) => alias.startsWith("S")).length, 0);
+  assert.equal(aliases.some((alias) => alias.startsWith("m")), true);
+  assert.equal(aliases.some((alias) => alias.startsWith("s")), true);
+  assert.equal(aliases.every((alias) => first.isLexicallyValid(alias)), true);
+  assert.deepEqual(
+    aliases,
+    Array.from({ length: 3_720 }, (_, index) => second.encodeAlias(index)),
+  );
+});
+
+test("compact-v2 remains size-neutral against compact-v1 when widths match", () => {
+  const messages = Array.from({ length: 721 }, (_, index) =>
+    message(
+      `m-${String(index).padStart(4, "0")}`,
+      index,
+      index % 2 === 0 ? "user" : "assistant",
+      `Evidence ${index} の比較用本文です。`,
+    ),
+  );
+  const sources = [source("size", "2026-07-01", messages)];
+  const v1 = buildCanonicalReviewEvidenceInputV1(sources).transport;
+  const v2 = buildCanonicalReviewEvidenceInput(sources).transport;
+
+  assert.equal(v1.serializationVersion, REVIEW_EVIDENCE_TRANSPORT_VERSION_V1);
+  assert.equal(v2.serializationVersion, REVIEW_EVIDENCE_TRANSPORT_VERSION_V2);
+  assert.equal(v1.aliasWidth, 2);
+  assert.equal(v2.aliasWidth, 2);
+  assert.equal(v1.serializedChars, v2.serializedChars);
+  assert.equal(v1.evidenceCount, v2.evidenceCount);
+  assert.equal(
+    [...v2.evidenceByAlias.keys()].some(
+      (alias) => alias.startsWith("M") || alias.startsWith("S"),
+    ),
+    false,
+  );
+});
+
 test("duplicate Evidence text and duplicate Session content remain distinct", () => {
   const duplicatedMessages = [message("m-1", 0, "user", sameText)];
   const { input, transport } = buildCanonicalReviewEvidenceInput([
@@ -230,9 +329,12 @@ test("alias shape diagnostics are aggregate-only and never normalize lookup", ()
   const diagnostic = diagnoseReviewEvidenceAliases(rawAliases, transport);
 
   assert.deepEqual(diagnostic, {
+    transportVersion: REVIEW_EVIDENCE_TRANSPORT_VERSION_V2,
     totalAliasReferences: 7,
     uniqueReturnedAliasCount: 7,
     expectedAliasWidth: 1,
+    contractLexicallyValidCount: 2,
+    contractLexicallyInvalidCount: 5,
     base62OnlyCount: 3,
     expectedWidthCount: 3,
     exactMemberCount: 1,
@@ -312,6 +414,29 @@ test("wrong-width diagnostics expose bounded lengths and known envelope-token co
   assert.equal(diagnostic.knownSessionRefCount, 0);
   assert.equal(diagnostic.mixedAlphaNumericCount, 33);
   assert.doesNotMatch(JSON.stringify(diagnostic), /M001/);
+});
+
+test("shared diagnostics apply the request transport version's lexical contract", () => {
+  const messages = Array.from({ length: 721 }, (_, index) =>
+    message(
+      `m-${String(index).padStart(4, "0")}`,
+      index,
+      "user",
+      `Evidence ${index} の本文です。`,
+    ),
+  );
+  const sources = [source("versioned", "2026-07-01", messages)];
+  const v1 = buildCanonicalReviewEvidenceInputV1(sources).transport;
+  const v2 = buildCanonicalReviewEvidenceInput(sources).transport;
+  const historical = diagnoseReviewEvidenceAliases(["M0"], v1);
+  const current = diagnoseReviewEvidenceAliases(["M0"], v2);
+
+  assert.equal(historical.transportVersion, REVIEW_EVIDENCE_TRANSPORT_VERSION_V1);
+  assert.equal(historical.contractLexicallyValidCount, 1);
+  assert.equal(historical.contractLexicallyInvalidCount, 0);
+  assert.equal(current.transportVersion, REVIEW_EVIDENCE_TRANSPORT_VERSION_V2);
+  assert.equal(current.contractLexicallyValidCount, 0);
+  assert.equal(current.contractLexicallyInvalidCount, 1);
 });
 
 test("alias length histogram has a fixed bounded bucket set", () => {

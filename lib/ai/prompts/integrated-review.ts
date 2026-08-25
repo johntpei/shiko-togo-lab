@@ -1,5 +1,6 @@
 import { APP_NAME } from "@/lib/app/identity";
 import { formatCurrentContextBlock } from "@/lib/app/current-context";
+import type { ReviewEvidenceAliasContract } from "@/lib/ai/review-evidence-transport";
 
 export const INTEGRATED_REVIEW_PROMPT_V1 = "integrated-review-v1";
 export const INTEGRATED_REVIEW_PROMPT_V2 = "integrated-review-v2";
@@ -9,7 +10,8 @@ export const INTEGRATED_REVIEW_PROMPT_V5 = "integrated-review-v5";
 export const INTEGRATED_REVIEW_PROMPT_V6 = "integrated-review-v6";
 export const INTEGRATED_REVIEW_PROMPT_V7 = "integrated-review-v7";
 export const INTEGRATED_REVIEW_PROMPT_V8 = "integrated-review-v8";
-export const INTEGRATED_REVIEW_PROMPT_VERSION = INTEGRATED_REVIEW_PROMPT_V8;
+export const INTEGRATED_REVIEW_PROMPT_V9 = "integrated-review-v9";
+export const INTEGRATED_REVIEW_PROMPT_VERSION = INTEGRATED_REVIEW_PROMPT_V9;
 
 export const INTEGRATED_REVIEW_SYSTEM_PROMPT_V1 = `あなたは、複数の対話Sessionを横断して「まだ本人が気づいていなかったつながり」を見つけるアシスタントです。
 与えられた Session / Evidence Units 以外の情報は使いません。Web検索や一般知識での補完もしません。
@@ -520,7 +522,14 @@ export const INTEGRATED_REVIEW_SYSTEM_PROMPT_V8 = `${INTEGRATED_REVIEW_SYSTEM_PR
 - evidenceGroups.sessionRefにはSessionRefを入れますが、evidenceAliases / beforeEvidenceAliases / afterEvidenceAliasesにはEvidence行先頭のbare EvidenceAliasだけを入れてください。
 `;
 
-export const INTEGRATED_REVIEW_SYSTEM_PROMPT = INTEGRATED_REVIEW_SYSTEM_PROMPT_V8;
+export const INTEGRATED_REVIEW_SYSTEM_PROMPT_V9 = `${INTEGRATED_REVIEW_SYSTEM_PROMPT_V8}
+
+# EvidenceAlias v9 reserved namespaces
+- SessionRefとMessageRefのnamespaceは予約されています。bare EvidenceAliasの先頭文字が大文字のMまたはSになることはありません。
+- M001のようなMessageRef、S01のようなSessionRefをEvidenceAliasとして返さないでください。
+`;
+
+export const INTEGRATED_REVIEW_SYSTEM_PROMPT = INTEGRATED_REVIEW_SYSTEM_PROMPT_V9;
 
 export function buildIntegratedReviewUserPrompt(labeledTranscript: string) {
   return `次の複数 Session の Evidence Units だけを横断分析してください。
@@ -689,6 +698,51 @@ Hypothesis には rationale と validationIdea。nextQuestions は今回の発�
 #で始まらないEvidence行は「bare EvidenceAlias、タブ、Evidence本文」です。
 このrequestのbare EvidenceAliasはすべて正確に ${aliasWidth} 文字です。
 使用可能な文字は 0-9、A-Z、a-z です。大文字と小文字は区別されます。
+文法に合う任意の値ではなく、入力のEvidence行に実在するbare EvidenceAliasだけを一字も変えずにコピーしてください。
+evidenceGroups.sessionRefだけには#S recordのSessionRefを入れます。
+evidenceAliases / beforeEvidenceAliases / afterEvidenceAliasesにはSessionRefやMessageRefを入れず、bare EvidenceAliasだけを入れてください。
+prefix、括弧、引用符、前後の空白を追加しないでください。
+旧形式のSession/Message/Evidence参照をEvidenceAliasとして返さないでください。
+Evidence本文内の改行・復帰・タブは、それぞれ↵・␍・↹と表記されます。これらは本文の文字を削除する記号ではありません。
+出力ではEvidence本文を書かないでください。
+#Fは添付ありの印でEvidenceではありません。#XはSessionAnalysisであり参考情報のみ、Evidenceではありません。
+
+${currentContextForAliasV7(currentContextBlock)}
+
+${compactEvidence}`;
+}
+
+export function buildIntegratedReviewUserPromptV9(
+  compactEvidence: string,
+  aliasContract: ReviewEvidenceAliasContract,
+  currentContextBlock: string = formatCurrentContextBlock(),
+) {
+  const positiveExamples = aliasContract.exampleAliases.join(" / ");
+  const sameWidthMessageRefShape = `M${"0".repeat(
+    Math.max(0, aliasContract.width - 1),
+  )}`;
+  const sameWidthSessionRefShape = `S${"0".repeat(
+    Math.max(0, aliasContract.width - 1),
+  )}`;
+  return `次の複数 Session の Evidence Units を、Evidence-first で横断分析してください。
+
+先に異なるSessionから関連Evidenceをグループ化し、関係を見てから Claim を書いてください。
+Claimを先に考えないでください。2 Session分の実在Evidenceが無ければそのitemは出さないでください。
+存在しない EvidenceAlias を作らないでください。Current Context は Evidence ではありません。
+commonThemes / crossInsights / hypotheses は evidenceGroups を必須とし、同じaliasを evidenceAliases にも列挙してください。
+tensions は sideA と sideB を異なるSessionのEvidenceで先に固めてください。
+Hypothesis には rationale と validationIdea。nextQuestions は今回の発見から作ってください。「次のステップは何か？」は禁止です。
+
+# Compact EvidenceAlias v9 contract
+#S recordは「#S、タブ、SessionRef」です。SessionRef（例: S01）は予約されたmetadataでありEvidenceAliasではありません。
+#Tはタイトル、#Dは日付です。
+#M recordは「#M、タブ、MessageRef、タブ、role」です。MessageRef（例: M001）は予約されたmetadataでありEvidenceAliasではありません。UはUSER、AはASSISTANTです。
+#で始まらないEvidence行は「bare EvidenceAlias、タブ、Evidence本文」です。
+このrequestのbare EvidenceAliasはすべて正確に ${aliasContract.width} 文字です。
+先頭文字に使用できる文字は ${aliasContract.firstAlphabet} です。大文字のMとSは予約されているため、EvidenceAliasの先頭には使用できません。
+2文字目以降に使用できる文字は ${aliasContract.restAlphabet} です。大文字と小文字は区別されます。
+このrequestに実在する正しいEvidenceAliasの例: ${positiveExamples || "（EvidenceAliasなし）"}
+M001はMessageRef、S01はSessionRefであり、EvidenceAliasとして返してはいけません。このrequestと同じ幅でも ${sameWidthMessageRefShape} / ${sameWidthSessionRefShape} はEvidenceAliasとして無効です。
 文法に合う任意の値ではなく、入力のEvidence行に実在するbare EvidenceAliasだけを一字も変えずにコピーしてください。
 evidenceGroups.sessionRefだけには#S recordのSessionRefを入れます。
 evidenceAliases / beforeEvidenceAliases / afterEvidenceAliasesにはSessionRefやMessageRefを入れず、bare EvidenceAliasだけを入れてください。

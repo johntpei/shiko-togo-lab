@@ -172,10 +172,10 @@ test("A. empty selection is a valid no_selection plan", () => {
   assert.equal(plan.workload.reviewCallsKnown, 0);
   assert.equal(plan.codeFacts.triggerPolicy, "explicit_session_selection");
   assert.deepEqual(plan.review.targetVersions, {
-    prompt: "integrated-review-v8",
-    schema: "integrated_review_v8",
+    prompt: "integrated-review-v9",
+    schema: "integrated_review_v9",
     processing: "integrated-review-processing-v2",
-    transport: "review-evidence-compact-v1",
+    transport: "review-evidence-compact-v2",
   });
 });
 

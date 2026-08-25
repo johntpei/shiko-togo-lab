@@ -7,6 +7,7 @@ import {
   INTEGRATED_REVIEW_PROMPT_V6,
   INTEGRATED_REVIEW_PROMPT_V7,
   INTEGRATED_REVIEW_PROMPT_V8,
+  INTEGRATED_REVIEW_PROMPT_V9,
 } from "@/lib/ai/prompts/integrated-review";
 import {
   isProjectableReviewVersion,
@@ -14,9 +15,9 @@ import {
   reviewProjectionEligibility,
 } from "./projection-eligibility";
 
-test("v5/v6/v7 backward compatibilityを保ち、現行v8も投影対象", () => {
-  assert.equal(PROJECTABLE_REVIEW_PROMPT_VERSION, "integrated-review-v8");
-  assert.equal(PROJECTABLE_REVIEW_PROMPT_VERSION, INTEGRATED_REVIEW_PROMPT_V8);
+test("v5-v8 backward compatibilityを保ち、現行v9も投影対象", () => {
+  assert.equal(PROJECTABLE_REVIEW_PROMPT_VERSION, "integrated-review-v9");
+  assert.equal(PROJECTABLE_REVIEW_PROMPT_VERSION, INTEGRATED_REVIEW_PROMPT_V9);
   assert.deepEqual(reviewProjectionEligibility(INTEGRATED_REVIEW_PROMPT_V5), {
     eligible: true,
     promptVersion: "integrated-review-v5",
@@ -37,6 +38,11 @@ test("v5/v6/v7 backward compatibilityを保ち、現行v8も投影対象", () =>
     promptVersion: "integrated-review-v8",
   });
   assert.equal(isProjectableReviewVersion(INTEGRATED_REVIEW_PROMPT_V8), true);
+  assert.deepEqual(reviewProjectionEligibility(INTEGRATED_REVIEW_PROMPT_V9), {
+    eligible: true,
+    promptVersion: "integrated-review-v9",
+  });
+  assert.equal(isProjectableReviewVersion(INTEGRATED_REVIEW_PROMPT_V9), true);
 });
 
 test("v3 / v4 は例外を投げず projection 対象外", () => {

@@ -3,6 +3,10 @@ import { EVIDENCE_FAILURE_REASONS } from "./evidence";
 import { REVIEW_RELATION_TYPES } from "./evidence-groups";
 import { EVIDENCE_ROLES } from "./evidence-units";
 import { INTEGRATED_REVIEW_MAX_INPUT_CHARS } from "./limits";
+import {
+  REVIEW_EVIDENCE_TRANSPORT_VERSION_V2,
+  type ReviewEvidenceAliasContract,
+} from "./review-evidence-transport";
 
 export const REVIEW_SEMANTIC_FAILURE_REASONS = [
   "insufficient_distinct_sessions",
@@ -229,7 +233,8 @@ export type IntegratedReviewV6Output = z.infer<
 export const INTEGRATED_REVIEW_SCHEMA_V6 = "integrated_review_v6" as const;
 export const INTEGRATED_REVIEW_SCHEMA_V7 = "integrated_review_v7" as const;
 export const INTEGRATED_REVIEW_SCHEMA_V8 = "integrated_review_v8" as const;
-export const INTEGRATED_REVIEW_SCHEMA_NAME = INTEGRATED_REVIEW_SCHEMA_V8;
+export const INTEGRATED_REVIEW_SCHEMA_V9 = "integrated_review_v9" as const;
+export const INTEGRATED_REVIEW_SCHEMA_NAME = INTEGRATED_REVIEW_SCHEMA_V9;
 
 const reviewEvidenceAliasV7Schema = z
   .string()
@@ -317,12 +322,7 @@ function reviewEvidenceAliasV8Schema(aliasWidth: number) {
     );
 }
 
-/**
- * v8 adds request-owned lexical constraints to every alias-bearing field.
- * Exact membership remains authoritative in the server-owned alias map.
- */
-export function createIntegratedReviewV8OutputSchema(aliasWidth: number) {
-  const evidenceAlias = reviewEvidenceAliasV8Schema(aliasWidth);
+function createIntegratedReviewAliasOutputSchema(evidenceAlias: z.ZodString) {
   const aliasItem = z.object({
     text: z.string(),
     evidenceAliases: z.array(evidenceAlias),
@@ -381,8 +381,54 @@ export function createIntegratedReviewV8OutputSchema(aliasWidth: number) {
   });
 }
 
+/**
+ * v8 adds request-owned lexical constraints to every alias-bearing field.
+ * Exact membership remains authoritative in the server-owned alias map.
+ */
+export function createIntegratedReviewV8OutputSchema(aliasWidth: number) {
+  return createIntegratedReviewAliasOutputSchema(
+    reviewEvidenceAliasV8Schema(aliasWidth),
+  );
+}
+
 export type IntegratedReviewV8Output = z.infer<
   ReturnType<typeof createIntegratedReviewV8OutputSchema>
+>;
+
+function reviewEvidenceAliasV9Schema(
+  aliasContract: ReviewEvidenceAliasContract,
+) {
+  if (
+    aliasContract.serializationVersion !==
+    REVIEW_EVIDENCE_TRANSPORT_VERSION_V2
+  ) {
+    throw new Error("Review v9 requires the compact-v2 alias contract");
+  }
+  return z
+    .string()
+    .min(aliasContract.minLength)
+    .max(aliasContract.maxLength)
+    .regex(new RegExp(aliasContract.pattern))
+    .describe(
+      `Bare, case-sensitive EvidenceAlias copied exactly from an Evidence row. It must be exactly ${aliasContract.width} characters. Its first character must come from ${aliasContract.firstAlphabet}; uppercase M and S are reserved for metadata namespaces. Remaining characters use ${aliasContract.restAlphabet}. SessionRef and MessageRef metadata are not EvidenceAliases.`,
+    );
+}
+
+/**
+ * v9 derives its request-owned lexical namespace from the same compact-v2
+ * contract used by the serializer and Prompt. Exact map membership remains
+ * authoritative after structured parsing.
+ */
+export function createIntegratedReviewV9OutputSchema(
+  aliasContract: ReviewEvidenceAliasContract,
+) {
+  return createIntegratedReviewAliasOutputSchema(
+    reviewEvidenceAliasV9Schema(aliasContract),
+  );
+}
+
+export type IntegratedReviewV9Output = z.infer<
+  ReturnType<typeof createIntegratedReviewV9OutputSchema>
 >;
 
 export const storedReviewEvidenceSchema = z.object({

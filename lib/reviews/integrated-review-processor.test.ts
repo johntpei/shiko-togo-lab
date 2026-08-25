@@ -4,7 +4,7 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import {
   INTEGRATED_REVIEW_PROMPT_V5,
-  INTEGRATED_REVIEW_PROMPT_V8,
+  INTEGRATED_REVIEW_PROMPT_V9,
 } from "@/lib/ai/prompts/integrated-review";
 import type { ReviewSessionSource } from "@/lib/ai/review-input";
 import type { StoredReviewPayload } from "@/lib/ai/review-schemas";
@@ -370,7 +370,7 @@ test("all-invalid v2 generation reports one LLM call and creates no durable Revi
       {
         db,
         generateStructured: async (request) => {
-          assert.equal(request.schemaName, "integrated_review_v8");
+          assert.equal(request.schemaName, "integrated_review_v9");
           assert.match(request.user, /正確に 1 文字/);
           return {
             parsed: {
@@ -518,7 +518,7 @@ test("historical v1 review_saved recovery remains LLM-free after v2 bump", async
   assert.equal(run?.phase, "projection_done");
 });
 
-test("new successful Review metadata targets prompt v8 and processing v2", () => {
+test("new successful Review metadata targets prompt v9 and processing v2", () => {
   const db = openMemoryDb();
   seedSession(db, "s-a");
   seedSession(db, "s-b");
@@ -526,7 +526,7 @@ test("new successful Review metadata targets prompt v8 and processing v2", () =>
     {
       title: "v2",
       model: "test",
-      promptVersion: INTEGRATED_REVIEW_PROMPT_V8,
+      promptVersion: INTEGRATED_REVIEW_PROMPT_V9,
       payload: emptyPayload(),
       sessionIds: ["s-a", "s-b"],
       evidences: [],
