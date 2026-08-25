@@ -265,6 +265,22 @@ export function ProcessingPanel({
                         件 / 旧形式 {executeState.result.reviewFailure.groundingDiagnostic.aliasDiagnostics.legacyEvidenceRefShapeCount}
                         件 / wrapper形状 {executeState.result.reviewFailure.groundingDiagnostic.aliasDiagnostics.wrapperShapeCount}
                         件
+                        <br />
+                        長さ分布 {Object.entries(
+                          executeState.result.reviewFailure.groundingDiagnostic.aliasDiagnostics.returnedAliasLengthHistogram,
+                        )
+                          .filter(([, count]) => count > 0)
+                          .map(([bucket, count]) => `${bucket}文字:${count}件`)
+                          .join(" / ") || "なし"}
+                        {executeState.result.reviewFailure.groundingDiagnostic.aliasDiagnostics.uniformReturnedAliasLength !== null
+                          ? ` / 全件同じ長さ: ${executeState.result.reviewFailure.groundingDiagnostic.aliasDiagnostics.uniformReturnedAliasLength}文字`
+                          : ""}
+                        <br />
+                        SessionRef形状 {executeState.result.reviewFailure.groundingDiagnostic.aliasDiagnostics.sessionRefShapeCount}
+                        件（既知token一致 {executeState.result.reviewFailure.groundingDiagnostic.aliasDiagnostics.knownSessionRefCount}
+                        件） / MessageRef形状 {executeState.result.reviewFailure.groundingDiagnostic.aliasDiagnostics.messageRefShapeCount}
+                        件（既知token一致 {executeState.result.reviewFailure.groundingDiagnostic.aliasDiagnostics.knownMessageRefCount}
+                        件）
                       </dd>
                     </div>
                   ) : null}

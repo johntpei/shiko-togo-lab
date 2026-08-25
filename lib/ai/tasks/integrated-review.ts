@@ -16,7 +16,7 @@ import {
 import {
   INTEGRATED_REVIEW_PROMPT_VERSION,
   INTEGRATED_REVIEW_SYSTEM_PROMPT,
-  buildIntegratedReviewUserPromptV7,
+  buildIntegratedReviewUserPromptV8,
 } from "../prompts/integrated-review";
 import type { AiProvider } from "../provider";
 import type { ReviewSessionSource } from "../review-input";
@@ -24,9 +24,9 @@ import type { EvidenceUnit } from "../evidence-units";
 import {
   defaultReviewSettings,
   INTEGRATED_REVIEW_SCHEMA_NAME,
-  integratedReviewV7OutputSchema,
+  createIntegratedReviewV8OutputSchema,
   type IntegratedReviewV5Output,
-  type IntegratedReviewV7Output,
+  type IntegratedReviewV8Output,
   type StoredReviewEvidence,
   type StoredReviewItem,
   type StoredReviewPayload,
@@ -145,7 +145,7 @@ function normalizeAliasList(
 }
 
 function normalizeIntegratedReviewAliasOutput(
-  output: IntegratedReviewV7Output,
+  output: IntegratedReviewV8Output,
   evidenceByAlias: ReadonlyMap<string, EvidenceUnit>,
 ): IntegratedReviewV5Output {
   const groups = (
@@ -210,7 +210,7 @@ function normalizeIntegratedReviewAliasOutput(
   };
 }
 
-function collectReturnedEvidenceAliases(output: IntegratedReviewV7Output) {
+function collectReturnedEvidenceAliases(output: IntegratedReviewV8Output) {
   const aliases: string[] = [];
   const addGrouped = (item: {
     evidenceGroups: Array<{ evidenceAliases: string[] }>;
@@ -350,15 +350,18 @@ export async function runIntegratedReview(
 
   let parsedUnknown: unknown;
   let usedModel = config.model;
+  const outputSchema = createIntegratedReviewV8OutputSchema(
+    transport.aliasWidth,
+  );
   try {
     const generated = await deps.generateStructured({
       model: config.model,
       system: INTEGRATED_REVIEW_SYSTEM_PROMPT,
-      user: buildIntegratedReviewUserPromptV7(
+      user: buildIntegratedReviewUserPromptV8(
         transport.serializedEvidence,
         transport.aliasWidth,
       ),
-      schema: integratedReviewV7OutputSchema,
+      schema: outputSchema,
       schemaName: INTEGRATED_REVIEW_SCHEMA_NAME,
       timeoutMs: INTEGRATED_REVIEW_TIMEOUT_MS,
     });
@@ -378,7 +381,7 @@ export async function runIntegratedReview(
     };
   }
 
-  const parsed = integratedReviewV7OutputSchema.safeParse(parsedUnknown);
+  const parsed = outputSchema.safeParse(parsedUnknown);
   if (!parsed.success) {
     return {
       ok: false,

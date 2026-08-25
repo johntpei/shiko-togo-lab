@@ -228,7 +228,8 @@ export type IntegratedReviewV6Output = z.infer<
 
 export const INTEGRATED_REVIEW_SCHEMA_V6 = "integrated_review_v6" as const;
 export const INTEGRATED_REVIEW_SCHEMA_V7 = "integrated_review_v7" as const;
-export const INTEGRATED_REVIEW_SCHEMA_NAME = INTEGRATED_REVIEW_SCHEMA_V7;
+export const INTEGRATED_REVIEW_SCHEMA_V8 = "integrated_review_v8" as const;
+export const INTEGRATED_REVIEW_SCHEMA_NAME = INTEGRATED_REVIEW_SCHEMA_V8;
 
 const reviewEvidenceAliasV7Schema = z
   .string()
@@ -301,6 +302,87 @@ export const integratedReviewV7OutputSchema = z.object({
 
 export type IntegratedReviewV7Output = z.infer<
   typeof integratedReviewV7OutputSchema
+>;
+
+function reviewEvidenceAliasV8Schema(aliasWidth: number) {
+  if (!Number.isSafeInteger(aliasWidth) || aliasWidth < 1) {
+    throw new Error("Review Evidence alias width must be a positive safe integer");
+  }
+  return z
+    .string()
+    .length(aliasWidth)
+    .regex(new RegExp(`^[0-9A-Za-z]{${aliasWidth}}$`))
+    .describe(
+      `Bare, case-sensitive EvidenceAlias copied exactly from an Evidence row. It must be exactly ${aliasWidth} ASCII base62 characters (0-9, A-Z, a-z), with no prefix, brackets, or whitespace. SessionRef and MessageRef metadata are not EvidenceAliases.`,
+    );
+}
+
+/**
+ * v8 adds request-owned lexical constraints to every alias-bearing field.
+ * Exact membership remains authoritative in the server-owned alias map.
+ */
+export function createIntegratedReviewV8OutputSchema(aliasWidth: number) {
+  const evidenceAlias = reviewEvidenceAliasV8Schema(aliasWidth);
+  const aliasItem = z.object({
+    text: z.string(),
+    evidenceAliases: z.array(evidenceAlias),
+  });
+  const aliasShiftItem = z.object({
+    before: z.string(),
+    after: z.string(),
+    interpretation: z.string(),
+    beforeEvidenceAliases: z.array(evidenceAlias),
+    afterEvidenceAliases: z.array(evidenceAlias),
+  });
+  const evidenceAliasGroup = z.object({
+    sessionRef: z
+      .string()
+      .describe(
+        "SessionRef metadata copied from a #S record (for example S01); this is not an EvidenceAlias.",
+      ),
+    evidenceAliases: z.array(evidenceAlias),
+  });
+  const groupedAliasItem = z.object({
+    text: z.string(),
+    relationType: z.enum(REVIEW_RELATION_TYPES),
+    evidenceGroups: z.array(evidenceAliasGroup),
+    evidenceAliases: z.array(evidenceAlias),
+  });
+  const aliasHypothesisItem = z.object({
+    text: z.string(),
+    rationale: z.string(),
+    validationIdea: z.string(),
+    relationType: z.enum(REVIEW_RELATION_TYPES),
+    evidenceGroups: z.array(evidenceAliasGroup),
+    evidenceAliases: z.array(evidenceAlias),
+  });
+  const aliasTensionSide = z.object({
+    text: z.string(),
+    evidenceAliases: z.array(evidenceAlias),
+  });
+  const aliasTensionItem = z.object({
+    text: z.string(),
+    relationType: z.enum(REVIEW_RELATION_TYPES),
+    sideA: aliasTensionSide,
+    sideB: aliasTensionSide,
+    evidenceGroups: z.array(evidenceAliasGroup),
+    evidenceAliases: z.array(evidenceAlias),
+  });
+
+  return z.object({
+    summary: z.string(),
+    commonThemes: z.array(groupedAliasItem),
+    shifts: z.array(aliasShiftItem),
+    tensions: z.array(aliasTensionItem),
+    crossInsights: z.array(groupedAliasItem),
+    hypotheses: z.array(aliasHypothesisItem),
+    openQuestions: z.array(aliasItem),
+    nextQuestions: z.array(aliasItem),
+  });
+}
+
+export type IntegratedReviewV8Output = z.infer<
+  ReturnType<typeof createIntegratedReviewV8OutputSchema>
 >;
 
 export const storedReviewEvidenceSchema = z.object({

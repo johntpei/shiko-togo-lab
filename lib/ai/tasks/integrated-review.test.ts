@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { zodTextFormat } from "openai/helpers/zod";
 import {
   INTEGRATED_REVIEW_MAX_INPUT_CHARS,
   MAX_COMMON_THEMES,
@@ -11,6 +12,7 @@ import { ANALYZE_SESSION_PROMPT_V4 } from "../prompts/analyze-session";
 import type { ReviewSessionSource } from "../review-input";
 import {
   INTEGRATED_REVIEW_SCHEMA_NAME,
+  createIntegratedReviewV8OutputSchema,
   integratedReviewV7OutputSchema,
 } from "../review-schemas";
 import {
@@ -164,7 +166,7 @@ function toV6TransportFixture(value: unknown): unknown {
       Array.isArray(field)
     ) {
       mapped[aliasKey] = field.map((ref) =>
-        exactRefAliases.get(String(ref)) ?? "unknownAlias",
+        exactRefAliases.get(String(ref)) ?? "Z",
       );
     } else {
       mapped[aliasKey] = toV6TransportFixture(field);
@@ -223,7 +225,7 @@ test("Case A: 2 Session 選択なら Review 可能", async () => {
     const result = await runIntegratedReview(twoSessions, "統合レビュー — テスト", {
       generateStructured: async (request) => {
         called = true;
-        assert.equal(request.schemaName, "integrated_review_v7");
+        assert.equal(request.schemaName, "integrated_review_v8");
         const contextIdx = request.user.indexOf("CURRENT CONTEXT");
         const sessionIdx = request.user.indexOf("#S\tS01");
         assert.ok(contextIdx >= 0 && sessionIdx > contextIdx);
@@ -1079,19 +1081,57 @@ test("Case M: Cross Insight を材料にした具体的 Next Question は残る"
   });
 });
 
-test("v7 schema exposes the exact-copy alias contract to structured output", () => {
-  assert.equal(INTEGRATED_REVIEW_SCHEMA_NAME, "integrated_review_v7");
-  const aliasDescription =
+test("v8 schema is request-scoped and sends exact dynamic base62 width to structured output", () => {
+  assert.equal(INTEGRATED_REVIEW_SCHEMA_NAME, "integrated_review_v8");
+  const historicalV7Description =
     integratedReviewV7OutputSchema.shape.commonThemes.element.shape
       .evidenceAliases.element.description;
-  assert.match(aliasDescription ?? "", /Case-sensitive ASCII base62/);
-  assert.match(aliasDescription ?? "", /no prefix, brackets, whitespace/);
+  assert.match(historicalV7Description ?? "", /Case-sensitive ASCII base62/);
+
+  const replaceAliases = (value: unknown, alias: string): unknown => {
+    if (Array.isArray(value)) {
+      return value.map((item) => replaceAliases(item, alias));
+    }
+    if (!value || typeof value !== "object") {
+      return value;
+    }
+    return Object.fromEntries(
+      Object.entries(value).map(([key, field]) => [
+        key,
+        key.endsWith("Aliases") && Array.isArray(field)
+          ? field.map(() => alias)
+          : replaceAliases(field, alias),
+      ]),
+    );
+  };
+  const aliasFixture = (alias: string) =>
+    replaceAliases(toV6TransportFixture(validOutput), alias);
+  const width2 = createIntegratedReviewV8OutputSchema(2);
+  const width3 = createIntegratedReviewV8OutputSchema(3);
+
+  assert.equal(width2.safeParse(aliasFixture("0A")).success, true);
+  assert.equal(width2.safeParse(aliasFixture("0Aa")).success, false);
+  assert.equal(width2.safeParse(aliasFixture("0-")).success, false);
+  assert.equal(width3.safeParse(aliasFixture("0Aa")).success, true);
+  assert.equal(width3.safeParse(aliasFixture("0A")).success, false);
+  assert.equal(width2.safeParse(aliasFixture("0A")).success, true);
+
+  const format = zodTextFormat(width2, INTEGRATED_REVIEW_SCHEMA_NAME);
+  const jsonSchema = JSON.stringify(format.schema);
+  assert.ok(jsonSchema.includes('"minLength":2'));
+  assert.ok(jsonSchema.includes('"maxLength":2'));
+  assert.ok(jsonSchema.includes('"pattern":"^[0-9A-Za-z]{2}$"'));
+  assert.ok(
+    jsonSchema.split('"pattern":"^[0-9A-Za-z]{2}$"').length - 1 >= 14,
+  );
+  assert.throws(() => createIntegratedReviewV8OutputSchema(0));
+  assert.throws(() => createIntegratedReviewV8OutputSchema(Number.NaN));
 });
 
-test("v7 all-unknown aliases fail before save with aggregate-only diagnostics", async () => {
+test("v8 correct-width non-member aliases reach exact membership gate without leaking raw values", async () => {
   await withReviewEnv(async () => {
     let saveCalls = 0;
-    const rawAlias = "secret-like-alias-value";
+    const rawAlias = "Z";
     const result = await runIntegratedReviewProduction(
       twoSessions,
       "統合レビュー — テスト",
@@ -1142,16 +1182,68 @@ test("v7 all-unknown aliases fail before save with aggregate-only diagnostics", 
     );
     assert.equal(
       result.groundingDiagnostic?.aliasDiagnostics.nonBase62Count,
-      2,
+      0,
+    );
+    assert.equal(
+      result.groundingDiagnostic?.aliasDiagnostics.unexpectedLengthCount,
+      0,
     );
     assert.equal(result.groundingDiagnostic?.usableValidatedEvidenceCount, 0);
-    assert.doesNotMatch(JSON.stringify(result), new RegExp(rawAlias));
+    assert.equal(JSON.stringify(result).includes(`"${rawAlias}"`), false);
     assert.doesNotMatch(JSON.stringify(result), /自由に考えたいです/);
     assert.doesNotMatch(JSON.stringify(result), /外部締切がある方が動きやすいです/);
   });
 });
 
-test("v7 genuine no-insight output with zero attempts remains saveable", async () => {
+test("v8 wrong-width provider payload fails schema without leaking raw aliases or retrying", async () => {
+  await withReviewEnv(async () => {
+    let saveCalls = 0;
+    const rawAlias = "SECRET_USER";
+    const result = await runIntegratedReviewProduction(
+      twoSessions,
+      "統合レビュー — テスト",
+      {
+        generateStructured: async () => ({
+          parsed: {
+            summary: "summary",
+            commonThemes: [
+              {
+                text: "grounded candidate",
+                relationType: "repetition",
+                evidenceGroups: [
+                  { sessionRef: "S01", evidenceAliases: [rawAlias] },
+                ],
+                evidenceAliases: [rawAlias],
+              },
+            ],
+            shifts: [],
+            tensions: [],
+            crossInsights: [],
+            hypotheses: [],
+            openQuestions: [],
+            nextQuestions: [],
+          },
+          model: "test-model",
+        }),
+        save: () => {
+          saveCalls += 1;
+          return { id: "must-not-save" };
+        },
+      },
+    );
+
+    assert.equal(result.ok, false);
+    if (result.ok) {
+      return;
+    }
+    assert.equal(result.code, "schema");
+    assert.equal(result.groundingDiagnostic, undefined);
+    assert.equal(saveCalls, 0);
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(rawAlias));
+  });
+});
+
+test("v8 genuine no-insight output with zero attempts remains saveable", async () => {
   await withReviewEnv(async () => {
     let saveCalls = 0;
     const result = await runIntegratedReview(

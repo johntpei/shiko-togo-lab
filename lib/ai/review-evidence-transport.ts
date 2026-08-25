@@ -25,6 +25,8 @@ export type CompactReviewEvidenceTransport = {
   aliasWidth: number;
   evidenceByAlias: Map<string, EvidenceUnit>;
   aliasByEvidenceRef: Map<string, string>;
+  sessionRefs: ReadonlySet<string>;
+  messageRefs: ReadonlySet<string>;
 };
 
 export type CompactReviewEvidencePreflight = Pick<
@@ -52,9 +54,76 @@ export type ReviewEvidenceAliasDiagnostics = {
   trimmedExactMemberCount: number;
   caseInsensitiveMemberCount: number;
   unwrappedExactMemberCount: number;
+  returnedAliasLengthHistogram: ReviewEvidenceAliasLengthHistogram;
+  allReturnedAliasesSameLength: boolean;
+  uniformReturnedAliasLength: number | null;
+  decimalOnlyCount: number;
+  lettersOnlyCount: number;
+  mixedAlphaNumericCount: number;
+  sessionRefShapeCount: number;
+  messageRefShapeCount: number;
+  knownSessionRefCount: number;
+  knownMessageRefCount: number;
 };
 
-function aliasWidthForCount(count: number) {
+export const REVIEW_EVIDENCE_ALIAS_LENGTH_BUCKETS = [
+  "0",
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "10",
+  "11-16",
+  "17-32",
+  ">32",
+] as const;
+
+export type ReviewEvidenceAliasLengthBucket =
+  (typeof REVIEW_EVIDENCE_ALIAS_LENGTH_BUCKETS)[number];
+
+export type ReviewEvidenceAliasLengthHistogram = Record<
+  ReviewEvidenceAliasLengthBucket,
+  number
+>;
+
+function emptyAliasLengthHistogram(): ReviewEvidenceAliasLengthHistogram {
+  return {
+    "0": 0,
+    "1": 0,
+    "2": 0,
+    "3": 0,
+    "4": 0,
+    "5": 0,
+    "6": 0,
+    "7": 0,
+    "8": 0,
+    "9": 0,
+    "10": 0,
+    "11-16": 0,
+    "17-32": 0,
+    ">32": 0,
+  };
+}
+
+function aliasLengthBucket(length: number): ReviewEvidenceAliasLengthBucket {
+  if (length <= 10) {
+    return String(length) as ReviewEvidenceAliasLengthBucket;
+  }
+  if (length <= 16) {
+    return "11-16";
+  }
+  if (length <= 32) {
+    return "17-32";
+  }
+  return ">32";
+}
+
+export function reviewEvidenceAliasWidthForCount(count: number) {
   if (!Number.isSafeInteger(count) || count < 0) {
     throw new Error("Review Evidence count must be a non-negative safe integer");
   }
@@ -123,7 +192,7 @@ export function diagnoseReviewEvidenceAliases(
   aliases: readonly string[],
   transport: Pick<
     CompactReviewEvidenceTransport,
-    "aliasWidth" | "evidenceByAlias"
+    "aliasWidth" | "evidenceByAlias" | "sessionRefs" | "messageRefs"
   >,
 ): ReviewEvidenceAliasDiagnostics {
   const canonicalLowercase = new Set(
@@ -138,11 +207,29 @@ export function diagnoseReviewEvidenceAliases(
   let trimmedExactMemberCount = 0;
   let caseInsensitiveMemberCount = 0;
   let unwrappedExactMemberCount = 0;
+  const returnedAliasLengthHistogram = emptyAliasLengthHistogram();
+  let decimalOnlyCount = 0;
+  let lettersOnlyCount = 0;
+  let mixedAlphaNumericCount = 0;
+  let sessionRefShapeCount = 0;
+  let messageRefShapeCount = 0;
+  let knownSessionRefCount = 0;
+  let knownMessageRefCount = 0;
 
   for (const alias of aliases) {
+    const lengthBucket = aliasLengthBucket(alias.length);
+    returnedAliasLengthHistogram[lengthBucket] += 1;
     const exact = transport.evidenceByAlias.has(alias);
-    if (isReviewEvidenceAliasLexicallySafe(alias)) {
+    const base62Only = isReviewEvidenceAliasLexicallySafe(alias);
+    if (base62Only) {
       base62OnlyCount += 1;
+      if (/^\d+$/.test(alias)) {
+        decimalOnlyCount += 1;
+      } else if (/^[A-Za-z]+$/.test(alias)) {
+        lettersOnlyCount += 1;
+      } else {
+        mixedAlphaNumericCount += 1;
+      }
     }
     if (alias.length === transport.aliasWidth) {
       expectedWidthCount += 1;
@@ -161,6 +248,18 @@ export function diagnoseReviewEvidenceAliases(
     if (LEGACY_REVIEW_EVIDENCE_REF_PATTERN.test(alias)) {
       legacyEvidenceRefShapeCount += 1;
     }
+    if (/^S\d+$/.test(alias)) {
+      sessionRefShapeCount += 1;
+    }
+    if (/^M\d+$/.test(alias)) {
+      messageRefShapeCount += 1;
+    }
+    if (transport.sessionRefs.has(alias)) {
+      knownSessionRefCount += 1;
+    }
+    if (transport.messageRefs.has(alias)) {
+      knownMessageRefCount += 1;
+    }
 
     const unwrapped = unwrappedAlias(alias);
     if (unwrapped !== null) {
@@ -173,6 +272,10 @@ export function diagnoseReviewEvidenceAliases(
       caseInsensitiveMemberCount += 1;
     }
   }
+
+  const returnedLengths = new Set(aliases.map((alias) => alias.length));
+  const allReturnedAliasesSameLength =
+    aliases.length > 0 && returnedLengths.size === 1;
 
   return {
     totalAliasReferences: aliases.length,
@@ -189,6 +292,18 @@ export function diagnoseReviewEvidenceAliases(
     trimmedExactMemberCount,
     caseInsensitiveMemberCount,
     unwrappedExactMemberCount,
+    returnedAliasLengthHistogram,
+    allReturnedAliasesSameLength,
+    uniformReturnedAliasLength: allReturnedAliasesSameLength
+      ? aliases[0]!.length
+      : null,
+    decimalOnlyCount,
+    lettersOnlyCount,
+    mixedAlphaNumericCount,
+    sessionRefShapeCount,
+    messageRefShapeCount,
+    knownSessionRefCount,
+    knownMessageRefCount,
   };
 }
 
@@ -253,9 +368,17 @@ export function buildCompactReviewEvidenceTransport(
   input: IntegratedReviewInput,
 ): CompactReviewEvidenceTransport {
   const evidenceCount = input.units.length;
-  const aliasWidth = aliasWidthForCount(evidenceCount);
+  const aliasWidth = reviewEvidenceAliasWidthForCount(evidenceCount);
   const evidenceByAlias = new Map<string, EvidenceUnit>();
   const aliasByEvidenceRef = new Map<string, string>();
+  const sessionRefs = new Set(
+    input.transportSessions.map((session) => session.sessionRef),
+  );
+  const messageRefs = new Set(
+    input.transportSessions.flatMap((session) =>
+      session.messages.map((message) => message.messageRef),
+    ),
+  );
 
   input.units.forEach((unit, index) => {
     const alias = encodeAlias(index, aliasWidth);
@@ -312,6 +435,8 @@ export function buildCompactReviewEvidenceTransport(
     aliasWidth,
     evidenceByAlias,
     aliasByEvidenceRef,
+    sessionRefs,
+    messageRefs,
   };
 }
 
@@ -322,7 +447,7 @@ export function exactEvidenceRefForAlias(
   return evidenceByAlias.get(alias)?.ref ?? INVALID_REVIEW_EVIDENCE_ALIAS_REF;
 }
 
-/** Canonical v6 input and size semantics shared by Plan, Executor, and task. */
+/** Canonical compact input and size semantics shared by Plan, Executor, and task. */
 export function buildCanonicalReviewEvidenceInput(
   sources: ReviewSessionSource[],
 ) {

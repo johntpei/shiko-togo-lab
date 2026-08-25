@@ -491,6 +491,31 @@ test("execution presentation exposes safe Review too_long diagnostics with human
         trimmedExactMemberCount: 0,
         caseInsensitiveMemberCount: 0,
         unwrappedExactMemberCount: 0,
+        returnedAliasLengthHistogram: {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 2,
+          "4": 0,
+          "5": 0,
+          "6": 0,
+          "7": 0,
+          "8": 0,
+          "9": 0,
+          "10": 0,
+          "11-16": 0,
+          "17-32": 0,
+          ">32": 0,
+        },
+        allReturnedAliasesSameLength: true,
+        uniformReturnedAliasLength: 3,
+        decimalOnlyCount: 0,
+        lettersOnlyCount: 0,
+        mixedAlphaNumericCount: 2,
+        sessionRefShapeCount: 2,
+        messageRefShapeCount: 0,
+        knownSessionRefCount: 2,
+        knownMessageRefCount: 0,
       },
       usableValidatedEvidenceCount: 0,
     },
@@ -505,7 +530,10 @@ test("execution presentation exposes safe Review too_long diagnostics with human
       .unexpectedLengthCount,
     2,
   );
-  assert.doesNotMatch(JSON.stringify(groundingFailure), /returnedAlias/);
+  assert.doesNotMatch(
+    JSON.stringify(groundingFailure),
+    /rawAlias|returnedAliasValues/,
+  );
   assert.doesNotMatch(JSON.stringify(groundingFailure), /Evidence本文/);
 
   result.review.failureDiagnostic = {

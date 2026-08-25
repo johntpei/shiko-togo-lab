@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   INVALID_REVIEW_EVIDENCE_ALIAS_REF,
   REVIEW_EVIDENCE_ALIAS_ALPHABET,
+  REVIEW_EVIDENCE_ALIAS_LENGTH_BUCKETS,
   REVIEW_EVIDENCE_TRANSPORT_VERSION,
   buildCanonicalReviewEvidenceInput,
   decodeCompactReviewEvidenceText,
@@ -10,6 +11,7 @@ import {
   encodeCompactReviewEvidenceText,
   exactEvidenceRefForAlias,
   isReviewEvidenceAliasLexicallySafe,
+  reviewEvidenceAliasWidthForCount,
 } from "./review-evidence-transport";
 import { resolveEvidenceRef } from "./evidence-refs";
 import type { ReviewAnalyzeMessage, ReviewSessionSource } from "./review-input";
@@ -148,6 +150,15 @@ test("alias width expands beyond the two-character base62 namespace", () => {
   assert.equal(transport.evidenceByAlias.size, count);
 });
 
+test("alias width matches base62 capacity boundaries without request-global state", () => {
+  const base = REVIEW_EVIDENCE_ALIAS_ALPHABET.length;
+  assert.equal(reviewEvidenceAliasWidthForCount(0), 1);
+  assert.equal(reviewEvidenceAliasWidthForCount(base), 1);
+  assert.equal(reviewEvidenceAliasWidthForCount(base + 1), 2);
+  assert.equal(reviewEvidenceAliasWidthForCount(base ** 2), 2);
+  assert.equal(reviewEvidenceAliasWidthForCount(base ** 2 + 1), 3);
+});
+
 test("duplicate Evidence text and duplicate Session content remain distinct", () => {
   const duplicatedMessages = [message("m-1", 0, "user", sameText)];
   const { input, transport } = buildCanonicalReviewEvidenceInput([
@@ -233,6 +244,31 @@ test("alias shape diagnostics are aggregate-only and never normalize lookup", ()
     trimmedExactMemberCount: 1,
     caseInsensitiveMemberCount: 1,
     unwrappedExactMemberCount: 1,
+    returnedAliasLengthHistogram: {
+      "0": 0,
+      "1": 3,
+      "2": 2,
+      "3": 1,
+      "4": 0,
+      "5": 0,
+      "6": 0,
+      "7": 0,
+      "8": 0,
+      "9": 0,
+      "10": 0,
+      "11-16": 1,
+      "17-32": 0,
+      ">32": 0,
+    },
+    allReturnedAliasesSameLength: false,
+    uniformReturnedAliasLength: null,
+    decimalOnlyCount: 0,
+    lettersOnlyCount: 3,
+    mixedAlphaNumericCount: 0,
+    sessionRefShapeCount: 0,
+    messageRefShapeCount: 0,
+    knownSessionRefCount: 0,
+    knownMessageRefCount: 0,
   });
   assert.equal(
     exactEvidenceRefForAlias(`${letterAlias} `, transport.evidenceByAlias),
@@ -243,4 +279,65 @@ test("alias shape diagnostics are aggregate-only and never normalize lookup", ()
     INVALID_REVIEW_EVIDENCE_ALIAS_REF,
   );
   assert.doesNotMatch(JSON.stringify(diagnostic), /S01|M001|E01/);
+});
+
+test("wrong-width diagnostics expose bounded lengths and known envelope-token counts only", () => {
+  const { transport } = buildCanonicalReviewEvidenceInput([
+    source("a", "2026-07-01", [
+      message("m-1", 0, "user", "一つ目のEvidence本文です。"),
+      message("m-2", 1, "assistant", "二つ目のEvidence本文です。"),
+    ]),
+  ]);
+  const envelopeDiagnostic = diagnoseReviewEvidenceAliases(
+    ["S01", "M001"],
+    transport,
+  );
+  assert.equal(envelopeDiagnostic.sessionRefShapeCount, 1);
+  assert.equal(envelopeDiagnostic.knownSessionRefCount, 1);
+  assert.equal(envelopeDiagnostic.messageRefShapeCount, 1);
+  assert.equal(envelopeDiagnostic.knownMessageRefCount, 1);
+  assert.doesNotMatch(JSON.stringify(envelopeDiagnostic), /S01|M001/);
+
+  const rawAliases = Array.from({ length: 33 }, () => "M001");
+  const diagnostic = diagnoseReviewEvidenceAliases(rawAliases, transport);
+
+  assert.equal(diagnostic.totalAliasReferences, 33);
+  assert.equal(diagnostic.unexpectedLengthCount, 33);
+  assert.equal(diagnostic.returnedAliasLengthHistogram["4"], 33);
+  assert.equal(diagnostic.allReturnedAliasesSameLength, true);
+  assert.equal(diagnostic.uniformReturnedAliasLength, 4);
+  assert.equal(diagnostic.messageRefShapeCount, 33);
+  assert.equal(diagnostic.knownMessageRefCount, 33);
+  assert.equal(diagnostic.sessionRefShapeCount, 0);
+  assert.equal(diagnostic.knownSessionRefCount, 0);
+  assert.equal(diagnostic.mixedAlphaNumericCount, 33);
+  assert.doesNotMatch(JSON.stringify(diagnostic), /M001/);
+});
+
+test("alias length histogram has a fixed bounded bucket set", () => {
+  const { transport } = buildCanonicalReviewEvidenceInput([
+    source("a", "2026-07-01", [
+      message("m-1", 0, "user", "Evidence本文です。"),
+    ]),
+  ]);
+  const aliases = [0, 1, 2, 10, 11, 16, 17, 32, 33, 100].map((length) =>
+    "A".repeat(length),
+  );
+  const diagnostic = diagnoseReviewEvidenceAliases(aliases, transport);
+
+  assert.deepEqual(
+    Object.keys(diagnostic.returnedAliasLengthHistogram),
+    REVIEW_EVIDENCE_ALIAS_LENGTH_BUCKETS,
+  );
+  assert.equal(diagnostic.returnedAliasLengthHistogram["0"], 1);
+  assert.equal(diagnostic.returnedAliasLengthHistogram["1"], 1);
+  assert.equal(diagnostic.returnedAliasLengthHistogram["2"], 1);
+  assert.equal(diagnostic.returnedAliasLengthHistogram["10"], 1);
+  assert.equal(diagnostic.returnedAliasLengthHistogram["11-16"], 2);
+  assert.equal(diagnostic.returnedAliasLengthHistogram["17-32"], 2);
+  assert.equal(diagnostic.returnedAliasLengthHistogram[">32"], 2);
+  assert.equal(Object.keys(diagnostic.returnedAliasLengthHistogram).length, 14);
+  assert.equal(diagnostic.allReturnedAliasesSameLength, false);
+  assert.equal(diagnostic.uniformReturnedAliasLength, null);
+  assert.doesNotMatch(JSON.stringify(diagnostic), /A{10}/);
 });
